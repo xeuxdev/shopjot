@@ -1,0 +1,13 @@
+{
+  "name": "doris-sync-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "drizzle-orm": "^0.45.4",
+    "fake-indexeddb": "^6.2.4",
+    "vitest": "^3.2.4"
+  }
+}
