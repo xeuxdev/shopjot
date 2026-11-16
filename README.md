@@ -1,4 +1,6 @@
-# Doris Foods
+# Shopjot
+
+An offline store ledger for independent shops. Each store starts with a name and a unique UUID, without needing an account or internet. Register or sign in when you want server backup. Multiple stores share the service while their accounts, sales, payments, stock, and backups remain separate.
 
 Two independent applications:
 
@@ -31,7 +33,7 @@ npm ci
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173`. It calls the API at `http://127.0.0.1:3001`. The frontend remains usable offline after the app shell is installed. Connect an owner account in Settings for server backup.
+Open `http://127.0.0.1:5173`. It calls the API at `http://127.0.0.1:3001`. The frontend remains usable offline after the app shell is installed. On first use, create a store or sign in to restore an existing store. Guest stores can record sales, stock and payments immediately. Connect an owner account in Settings for server backup; registration keeps the existing store ID and queued records.
 
 ## Deploy
 
@@ -73,6 +75,18 @@ TEST_DATABASE_URL=postgres://doris:doris_local_only@localhost:5437/doris_foods n
 The `tests/` folder is only an integration-test harness. Neither deployment imports it or depends on its packages. Its database fixtures use unique test accounts and are cleaned up afterward; use a local/test database.
 
 Money calculations and versioned sync contracts are committed under each application's `src/domain/`, so builds need no shared package or registry. `node scripts/check-domain.mjs` checks that these files remain identical. Update both copies together when changing the financial/protocol rules, then run the cross-application sync tests.
+
+## Stores and accounts
+
+- First use: enter a store name and create its local ledger, or sign in to restore a backed-up store.
+- Store names can repeat. Every store has its own stable UUID, shown in Settings and included in exports.
+- A guest store works offline without registration. Pending changes stay local until its owner registers an account.
+- Registration attaches the current name and ID to an owner email/password account, then backs up the existing ledger. It does not generate a replacement store ID.
+- Login on a fresh browser restores the server's name, ID and records. Restored phones remain read-only until explicit primary-device takeover.
+- Local records, drafts or queue entries prevent a different store from replacing that ledger during sign-in. A signed-out registered ledger remains locked until its owner signs in again.
+- Each browser profile holds one local store; each account currently owns one store. Multiple independent stores can use the same deployed Shopjot service.
+
+Existing installations are adopted in place. Internal IndexedDB, session-cookie and background-sync identifiers retain their legacy names so existing records, sessions and pending jobs keep working. Older guest ledgers keep the original store name; new stores always choose their own. No PostgreSQL schema change is needed for this rollout because every business record was already scoped by store ID.
 
 ## Preserved behavior
 

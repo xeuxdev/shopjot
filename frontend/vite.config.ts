@@ -33,8 +33,8 @@ export default defineConfig(({ command, mode }) => {
         registerType: 'prompt',
         includeAssets: ['icon.svg', 'icon-192.png', 'icon-512.png'],
         manifest: {
-          name: 'Doris Foods Store Ledger',
-          short_name: 'Doris Foods',
+          name: 'Shopjot — Store Ledger',
+          short_name: 'Shopjot',
           description: 'Your everyday store ledger, even offline.',
           theme_color: '#174f3b',
           background_color: '#f6f8f6',

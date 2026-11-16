@@ -5,7 +5,6 @@ import {
   ChevronRight,
   CircleHelp,
   Home as HomeIcon,
-  Leaf,
   MoreHorizontal,
   Package,
   ReceiptText,
@@ -17,6 +16,8 @@ import {
 } from 'lucide-react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import { Button } from '../components/ui';
+import { ShopjotMark } from '../components/brand';
+import { StoreSetup } from '../features/store-setup';
 import { useLedger } from '../lib/use-ledger';
 import { startSyncScheduler } from '../features/sync/scheduler';
 import { BackupSettings, backupLabel } from '../features/sync/backup-settings';
@@ -82,6 +83,10 @@ export function App() {
     const timer = setTimeout(() => setToast(''), 5500);
     return () => clearTimeout(timer);
   }, [toast]);
+  useEffect(() => {
+    document.title = data?.store ? `${data.store.name} · Shopjot` : 'Shopjot · Your store ledger';
+  }, [data?.store?.name]);
+  if (data && !data.store) return <StoreSetup />;
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main">
@@ -89,12 +94,9 @@ export function App() {
       </a>
       <aside className="sidebar">
         <NavLink className="brand" to="/">
-          <span className="brand-mark">
-            <span>D</span>
-            <Leaf size={14} />
-          </span>
+          <ShopjotMark />
           <span>
-            Doris Foods<small>Store ledger</small>
+            Shopjot<small>Store ledger</small>
           </span>
         </NavLink>
         <div className="sidebar-divider" />
@@ -123,9 +125,11 @@ export function App() {
             Settings & data
           </NavLink>
           <div className="owner-profile">
-            <span className="owner-avatar">D</span>
+            <span className="owner-avatar">
+              {Array.from(data?.store?.name ?? 'S')[0].toLocaleUpperCase()}
+            </span>
             <div>
-              <strong>Doris Foods</strong>
+              <strong title={data?.store?.name}>{data?.store?.name ?? 'Your store'}</strong>
               <small>{data?.account ? 'Owner account' : 'Local records'}</small>
             </div>
             <MoreHorizontal size={17} />
@@ -135,15 +139,17 @@ export function App() {
       <div className="workspace">
         <header className="topbar">
           <NavLink className="mobile-brand" to="/">
-            <span className="brand-mark">
-              <span>D</span>
-              <Leaf size={12} />
+            <ShopjotMark />
+            <span className="mobile-store">
+              <strong>Shopjot</strong>
+              <small title={data?.store?.name}>{data?.store?.name}</small>
             </span>
-            <strong>Doris Foods</strong>
           </NavLink>
           <div className="breadcrumb">
             <BookOpen size={17} />
-            <span>My store</span>
+            <span className="current-store-name" title={data?.store?.name}>
+              {data?.store?.name ?? 'My store'}
+            </span>
             <ChevronRight size={14} />
             <strong>
               {location.pathname === '/'
@@ -221,7 +227,7 @@ export function App() {
             </div>
           )}
           <footer className="page-footer">
-            <span>Doris Foods</span>
+            <span>Shopjot · {data?.store?.name}</span>
             <span>A little order. A better day.</span>
           </footer>
         </main>

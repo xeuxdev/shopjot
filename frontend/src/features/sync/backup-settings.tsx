@@ -88,6 +88,7 @@ export function BackupSettings({
   return (
     <section className="panel form-section backup-settings">
       <h2>Backup & account</h2>
+      <p className="backup-store-name">{data.store?.name}</p>
       <div className="backup-summary">
         <ShieldCheck size={24} />
         <div>
@@ -133,7 +134,7 @@ export function BackupSettings({
             {account
               ? 'Sign in again to resume backup. Your offline records are still on this phone.'
               : mode === 'register'
-                ? 'Connect this store to your private server backup. Local saves will keep working offline.'
+                ? 'An account is only needed for backup. Register this store to back up every saved record; your store ID stays the same.'
                 : 'Sign in to restore your backed-up store. A new phone starts in read-only mode until you explicitly switch devices.'}
           </p>
           <div className="field">

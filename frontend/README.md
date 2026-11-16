@@ -1,4 +1,4 @@
-# Doris Foods frontend
+# Shopjot frontend
 
 This folder is a complete standalone React/TypeScript/Vite PWA. It needs no files from `backend/` or the repository root to install or build.
 
@@ -23,7 +23,7 @@ npm run preview
 Standalone Docker build, from this folder:
 
 ```sh
-docker build --build-arg VITE_API_URL=https://api.example.com -t doris-frontend .
+docker build --build-arg VITE_API_URL=https://api.example.com -t shopjot-frontend .
 ```
 
 The image serves static files on port **8080**. It has no backend proxy or container dependency. Dokploy can deploy it independently using this folder as the build context.
@@ -36,5 +36,7 @@ npm run test:e2e
 ```
 
 For a connected check, run both applications against an isolated test database, build with the matching API URL, and set `SYNC_E2E=1`, `E2E_BASE_URL` to the frontend URL, and `SYNC_API_URL` to the backend URL. Connected browser tests create fictional accounts/records; do not use an owner-production database.
+
+The first screen creates a named guest store offline or signs in to restore an existing store. Registration later uses that exact store ID and name; guest use does not call the backup API. Store names and IDs appear in Settings and JSON exports.
 
 Existing phone data remains at the same frontend origin and IndexedDB name. The money/sync contract lives locally in `src/domain/`; the repository's optional contract check and integration tests detect differences from the API's copy without coupling deployment builds.

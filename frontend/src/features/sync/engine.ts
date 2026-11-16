@@ -15,6 +15,7 @@ import {
 } from '../../domain/index';
 import { db, type LedgerDB, type DeviceIdentity } from '../../db/database';
 import { initialSyncState, type LocalAccount, type SyncState } from '../../db/sync-state';
+import type { StoreProfile } from '../../db/store';
 import { HttpError, requestJson } from './http';
 import Dexie from 'dexie';
 
@@ -155,8 +156,27 @@ async function runWithLease(options: SyncOptions, exclusive: boolean): Promise<S
         'STORE_MISMATCH',
         'The signed-in account does not match this local ledger. No records were removed.',
       );
-    account = { ...account, writer: remoteAccount.writer };
-    await database.metadata.put({ key: 'account', value: account });
+    const refreshed = await database.transaction('rw', database.metadata, async () => {
+      const current = (await database.metadata.get('account'))?.value as LocalAccount | undefined;
+      if (
+        !current ||
+        current.signedOut ||
+        current.storeId !== remoteAccount.storeId ||
+        current.deviceId !== remoteAccount.deviceId
+      )
+        return false;
+      account = { ...current, ...remoteAccount };
+      await database.metadata.put({ key: 'account', value: account });
+      await database.metadata.put({
+        key: 'store',
+        value: {
+          id: remoteAccount.storeId,
+          name: remoteAccount.storeName,
+        } satisfies StoreProfile,
+      });
+      return true;
+    });
+    if (!refreshed) return 'local';
     if (options.retryFailed)
       await database.outbox
         .where('storeId')

@@ -1,5 +1,5 @@
 {
-  "name": "doris-sync-tests",
+  "name": "shopjot-sync-tests",
   "private": true,
   "type": "module",
   "scripts": {

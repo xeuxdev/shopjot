@@ -1,4 +1,4 @@
-# Doris Foods backend
+# Shopjot backend
 
 This folder is a complete standalone Fastify/TypeScript API. It needs no files from `frontend/` or the repository root to install, build, migrate, or run.
 
@@ -25,7 +25,7 @@ The build creates compiled `dist/server.js` and `dist/db/migrate.js`; production
 Standalone Docker build, from this folder:
 
 ```sh
-docker build -t doris-backend .
+docker build -t shopjot-backend .
 ```
 
 The image listens on port **3001**, applies checked-in migrations before starting, and uses `/api/ready` as its health check. Dokploy can deploy it independently using this folder as the build context.
@@ -38,7 +38,9 @@ DIRECT_DATABASE_URL=YOUR_NEON_DIRECT_CONNECTION_STRING
 WEB_ORIGIN=https://shop.example.com
 ```
 
-Use an HTTPS API hostname on the same parent domain as the frontend, e.g. `api.example.com`. Credentialed CORS is restricted to `WEB_ORIGIN`; CSRF origin checks, secure session cookies, store authorization, idempotency, and checksum verification remain enabled. Keep Neon URLs exclusively in this application's runtime environment.
+Use an HTTPS API hostname on the same parent domain as the frontend, e.g. `api.example.com`. Multiple independent stores share this API and database. Registration persists each supplied UUID/name with its owner account; duplicate names are allowed, IDs are unique. Server authentication determines the store scope, and ledger/backup endpoints require a valid session. A supplied store ID never grants access to another store.
+
+Credentialed CORS is restricted to `WEB_ORIGIN`; CSRF origin checks, secure session cookies, store authorization, idempotency, and checksum verification remain enabled. Keep Neon URLs exclusively in this application's runtime environment.
 
 Constraint tests require an isolated/local database:
 

@@ -1,6 +1,6 @@
-# Deploy frontend and backend separately in Dokploy
+# Deploy Shopjot frontend and backend separately in Dokploy
 
-Create **two Applications** in the same Dokploy project. Each has its own Dockerfile, install, build, and deploy button. No production Compose setup or shared Docker network is required.
+Deploy one shared Shopjot service for all stores; each store gets its own account and data scope. Create **two Applications** in the same Dokploy project. Each has its own Dockerfile, install, build, and deploy button. No production Compose setup or shared Docker network is required.
 
 Use two HTTPS subdomains on the same parent domain, for example:
 
@@ -59,9 +59,17 @@ VITE_API_URL=https://api.example.com
 
 This public URL is compiled into the frontend and its service worker. The frontend build rejects a missing or invalid API URL. No Neon credentials belong here. Changing `VITE_API_URL` requires rebuilding the frontend; changing backend database credentials only requires redeploying the backend.
 
-Deploy, then open `https://shop.example.com` and connect the owner account through **Settings & data → Backup & account**. Confirm **Backed up** after a fictional sale.
+Deploy, then open `https://shop.example.com` and create a named store without an account, then register its owner account through **Settings & data → Backup & account**. Returning owners can sign in directly from the setup screen. Confirm **Backed up** after a fictional sale.
 
 Create DNS A records for both domains pointing to your server before requesting Let's Encrypt certificates. Dokploy routes each domain to its application's container port; direct host-port publishing is unnecessary.
+
+## Store setup after deployment
+
+One frontend and one backend serve all stores. Each store has a unique UUID; names do not need to be unique. Customers, sales, payments, inventory and backup operations are scoped to the authenticated store. Do not create a separate Dokploy application or database for every shop.
+
+A new shop can enter a store name and work offline immediately. To back up, register an owner account in Settings. This links the existing store ID/name and pending records to that account. On another browser, use **Sign in to your store** to restore it. Each browser profile holds one local store; switching accounts cannot silently replace a ledger with saved records or drafts.
+
+This rollout requires no new PostgreSQL migration. Existing databases and browser IDs remain valid. Preserve the frontend origin and database URLs when updating; the public Shopjot rebrand does not require renaming local databases, Docker volumes or session cookies.
 
 ## Updates and existing records
 

@@ -1,5 +1,6 @@
 import { db, getIdentity } from '../db/database';
 import { outstandingFor, paymentStatus } from '../domain/index';
+import type { StoreProfile } from '../db/store';
 function download(name: string, data: string, type: string) {
   const url = URL.createObjectURL(new Blob([data], { type }));
   const link = document.createElement('a');
@@ -16,6 +17,7 @@ function cell(value: unknown) {
 export async function exportData(kind: 'sales' | 'customers' | 'json') {
   const identity = await getIdentity();
   const data = await db.transaction('r', db.tables, async () => ({
+    store: (await db.metadata.get('store'))?.value as StoreProfile | undefined,
     customers: await db.customers.where('storeId').equals(identity.storeId).toArray(),
     sales: await db.sales.where('storeId').equals(identity.storeId).toArray(),
     saleItems: await db.saleItems.where('storeId').equals(identity.storeId).toArray(),
@@ -28,7 +30,7 @@ export async function exportData(kind: 'sales' | 'customers' | 'json') {
   const date = new Date().toISOString().slice(0, 10);
   if (kind === 'json')
     return download(
-      `doris-foods-${date}.json`,
+      `shopjot-${identity.storeId}-${date}.json`,
       JSON.stringify(
         { version: 1, exportedAt: new Date().toISOString(), storeId: identity.storeId, ...data },
         null,
@@ -68,7 +70,7 @@ export async function exportData(kind: 'sales' | 'customers' | 'json') {
           ]),
         ];
   download(
-    `doris-foods-${kind}-${date}.csv`,
+    `shopjot-${kind}-${identity.storeId}-${date}.csv`,
     '\ufeff' + rows.map((row) => row.map(cell).join(',')).join('\r\n'),
     'text/csv;charset=utf-8',
   );

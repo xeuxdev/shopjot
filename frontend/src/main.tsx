@@ -2,13 +2,13 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { App, ErrorBoundary } from './app/App';
-import { getIdentity } from './db/database';
+import { initializeStore } from './db/store';
 import './styles.css';
 const root = createRoot(document.getElementById('root')!);
 async function start() {
   // Initialize outside liveQuery, whose transaction is deliberately read-only.
   try {
-    await getIdentity();
+    await initializeStore();
     root.render(
       <StrictMode>
         <ErrorBoundary>

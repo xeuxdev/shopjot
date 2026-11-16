@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LedgerDB, getIdentity } from './database';
+import { createLocalStore } from './store';
 import { adjustStock, recordPayment, registerStock, saveSale } from './ledger';
 import { outstandingFor, type SaleInput } from '../domain/index';
 
@@ -32,8 +33,9 @@ const input = (patch: Partial<SaleInput> = {}): SaleInput => ({
   initialPaymentKobo: 500000,
   ...patch,
 });
-beforeEach(() => {
+beforeEach(async () => {
   database = new LedgerDB(`test-${id()}`);
+  await createLocalStore('Test shop', database);
 });
 afterEach(async () => {
   await database.delete();

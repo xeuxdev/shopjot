@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { createStore } from '../helpers/store';
 
 test.describe('connected backup and recovery', () => {
   test.skip(!process.env.SYNC_E2E, 'Requires an API and an isolated PostgreSQL test database.');
@@ -10,7 +11,9 @@ test.describe('connected backup and recovery', () => {
     test.setTimeout(90_000);
     const email = `browser-${crypto.randomUUID()}@example.test`,
       password = 'browser-test-password-123';
-    await page.goto('/');
+    await createStore(page, 'Chika Family Stores');
+    await page.goto('/settings');
+    const originalStoreId = await page.locator('.store-id').innerText();
     await page.evaluate(async () => {
       await navigator.serviceWorker.ready;
     });
@@ -50,6 +53,8 @@ test.describe('connected backup and recovery', () => {
     await page.getByLabel('The records on this phone belong').check();
     await page.getByRole('button', { name: 'Create account & back up' }).click();
     await expect(page.locator('.backup-pill')).toHaveText('Backed up', { timeout: 30_000 });
+    await expect(page.locator('.store-id')).toHaveText(originalStoreId);
+    await expect(page.locator('.store-name')).toHaveText('Chika Family Stores');
     expect(dropped).toBe(true);
     await page.unroute('**/api/sync/push');
     await context.setOffline(true);
@@ -94,7 +99,7 @@ test.describe('connected backup and recovery', () => {
     try {
       const restored = await replacement.newPage();
       await restored.goto(new URL('/settings', firstSaleUrl).href);
-      await restored.getByRole('button', { name: 'Sign in / restore', exact: true }).click();
+      await restored.getByRole('button', { name: 'Sign in to your store', exact: true }).click();
       await restored.getByLabel('Owner email').fill(email);
       await restored.getByLabel('Password', { exact: true }).fill(password);
       await restored.getByRole('button', { name: 'Sign in and restore', exact: true }).click();
@@ -104,6 +109,8 @@ test.describe('connected backup and recovery', () => {
       await expect(
         restored.getByRole('button', { name: 'Make this the primary phone' }),
       ).toBeVisible();
+      await expect(restored.locator('.store-id')).toHaveText(originalStoreId);
+      await expect(restored.locator('.store-name')).toHaveText('Chika Family Stores');
       await restored.goto(new URL('/', firstSaleUrl).href);
       await expect(restored.locator('.sales-stat .stat-value')).toHaveText('₦7,500');
       await expect(restored.locator('.stat .stat-value').first()).toHaveText('₦6,500');

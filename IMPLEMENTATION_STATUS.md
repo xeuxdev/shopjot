@@ -1,6 +1,6 @@
-# Implementation status — 15 November 2026
+# Implementation status — 16 November 2026
 
-The original handoff remains the product source of truth. The application now has an authenticated custom Fastify API and verified offline-first synchronization, with deployment packaging for Dokploy and Neon PostgreSQL.
+Shopjot is now a multi-store offline ledger with optional owner accounts for verified backup. The original handoff remains product context; the later requirements replace the single-store branding and add named-store setup. Frontend and backend remain independently deployable in Dokploy, with Neon PostgreSQL behind the API.
 
 ## Implemented
 
@@ -17,6 +17,16 @@ The original handoff remains the product source of truth. The application now ha
 | Deployment       | Two independent Dokploy Applications; static Nginx frontend calls the API URL directly; credentialed CORS; Neon pooled/direct runtime URLs; locked startup migrations   |
 | Data safety      | Store-scoped CSV/JSON exports, persistent storage request, clear pending/error/backup state; no credential export                                                       |
 
+## Store lifecycle
+
+A first-time user can create a store with just a name, without an account or an API request. Its cryptographically generated UUID stays attached to its local sales, payments, customers, stock, drafts and ordered outbox. Names can repeat across stores; IDs cannot. The name and full ID appear in Settings and JSON exports; export filenames include the store ID.
+
+Registration sends this existing ID and the chosen name to the backend and signs in its owner. It keeps queued operations and begins verified backup. Login on a fresh browser adopts the server's name and ID, restores the ledger, and initially leaves the replacement read-only. Server authentication sets the store scope; supplying someone else's ID in a request cannot select their ledger.
+
+All local records and meaningful drafts are checked before switching to another store ID. A draft entered while a sign-in request is in flight also prevents replacement. An authentication check that finishes after sign-out cannot unlock the ledger or resume backup. Each browser profile currently holds one local store, and each account owns one store; the deployed service serves many independent stores.
+
+Existing installations get a named store profile in place, using the account name or original legacy store name. Their database name, device/store IDs, financial records, drafts, queue and sessions are retained. Internal cookie, IndexedDB, lock and background-sync identifiers intentionally retain their old names for compatibility. Store ID/name were already persisted server-side, so no new PostgreSQL schema migration is required.
+
 ## Reliability details
 
 A local financial write commits the sale, customer, items, initial payment, stock movements, and outbox record atomically. Queue sequence numbers are assigned inside the same transaction. The IndexedDB v2 migration orders legacy queued operations by their dependencies without dropping them, preserves existing IDs, and fills receipt positions where needed.
@@ -29,21 +39,22 @@ Pull collapses paginated absolute records and applies them in one IndexedDB tran
 
 Web Locks coordinate tabs and service workers and release automatically on termination. A persistent lease provides a bounded fallback for browsers without Web Locks. Browser testing caught and resolved stale-lease behavior after hard navigation; retry triggers that arrive during an active run are coalesced rather than lost.
 
-## Verification after the folder split
+## Verification after multi-store setup
 
 - `npm --prefix frontend run typecheck`, `lint`, and `build`: passed, including the custom service worker. The build uses an explicit `VITE_API_URL`.
-- `npm --prefix frontend test`: **22 tests passed**.
+- `npm --prefix frontend test`: **35 tests passed**, covering store creation, legacy adoption, guest registration, identity preservation, in-flight draft safety and sign-out races.
 - `npm --prefix backend run typecheck`, `lint`, and `build`: passed. The backend compiles to JavaScript and runs directly on Node, with no TypeScript runner in the production image.
 - `TEST_DATABASE_URL=… npm --prefix backend test`: **15 tests passed**, including four real PostgreSQL constraint tests.
 - `TEST_DATABASE_URL=… npm --prefix tests test`: **5 client/server sync tests passed**, including full entity backup, lost response after commit, malformed acknowledgment/reopen, account isolation, device takeover, checksum mismatch detection, and interrupted multi-page restore. This optional test harness is outside both deployable applications.
 - `node scripts/check-domain.mjs`: the independently committed money and versioned sync contracts match.
-- `docker build -t doris-backend:split backend`: passed using only the backend folder. Its compiled migration entry point applied migrations successfully against the isolated local QA database.
-- `docker build --build-arg VITE_API_URL=http://127.0.0.1:18081 -t doris-frontend:split frontend`: passed using only the frontend folder.
+- `docker build -t shopjot-backend:verify backend`: passed using only the backend folder. Its compiled migration entry point applied migrations successfully against the isolated local QA database.
+- `docker build --build-arg VITE_API_URL=http://127.0.0.1:18081 -t shopjot-frontend:verify frontend`: passed using only the frontend folder.
 - Both containers started independently and reported healthy. Static frontend deep links return 200; `/api/` on the frontend returns 404 because API traffic goes directly to the separate backend.
-- `SYNC_E2E=1 E2E_BASE_URL=… SYNC_API_URL=… npm --prefix frontend run test:e2e`: **9 browser tests passed** against the separate frontend/API containers and the isolated local QA database. Includes credentialed cross-origin login, four accessibility scans, offline reload/drafts, stock, repayments, automatic reconnect backup, a dropped response, restored records, and primary-device switching.
+- `SYNC_E2E=1 E2E_BASE_URL=… SYNC_API_URL=… npm --prefix frontend run test:e2e`: **13 browser tests passed** against the separate frontend/API containers and the isolated local QA database. Includes offline guest setup without API requests, duplicate store names with separate accounts/IDs/backups, store-aware JSON export, 320px long-name layout, setup/sign-in accessibility, four ledger accessibility scans, credentialed cross-origin login, offline reload/drafts, stock, repayments, automatic reconnect backup, a dropped response, restored store identity/name/records, and primary-device switching.
+- After the final mobile sign-in layout adjustment, all five store/sync browser checks passed again, including the visible-without-scrolling sign-in button, guest setup, duplicate-name store isolation, backup and restore.
 - Backend production-dependency audit: zero known vulnerabilities after updating Drizzle ORM to 0.45.4. This result covers production npm dependencies, not an audit of development tooling or container base images.
 
-That is **51 passing tests**: 22 frontend tests, 15 backend tests, five cross-application sync tests, and nine browser tests. Ten domain tests run in each application intentionally, because each ships its own financial/protocol rules.
+That is **68 passing tests**: 35 frontend tests, 15 backend tests, five cross-application sync tests, and 13 browser tests. Ten domain tests run in each application intentionally, because each ships its own financial/protocol rules.
 
 The old root dependency installation was removed before these checks. There is no root package/workspace manifest or build configuration. Each app can be built from its folder without the sibling application's source. Upstream Zod comment-annotation warnings do not prevent successful production builds.
 

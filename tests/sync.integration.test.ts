@@ -7,6 +7,7 @@ import { makeDatabase } from '../backend/src/db/client';
 import * as tables from '../backend/src/db/schema';
 import { readSnapshot } from '../backend/src/records';
 import { LedgerDB, getIdentity } from '../frontend/src/db/database';
+import { createLocalStore } from '../frontend/src/db/store';
 import { adjustStock, recordPayment, registerStock, saveSale } from '../frontend/src/db/ledger';
 import { runSync, localSnapshot, toWire } from '../frontend/src/features/sync/engine';
 import { HttpError } from '../frontend/src/features/sync/http';
@@ -23,9 +24,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       userIds: string[] = [],
       locals: LedgerDB[] = [];
     let clientIndex = 0;
-    async function owner() {
+    async function owner(storeName = 'Shopjot Test') {
       const local = new LedgerDB(`sync-test-${crypto.randomUUID()}`);
       locals.push(local);
+      await createLocalStore(storeName, local);
       const identity = await getIdentity(local),
         email = `${identity.storeId}@example.test`;
       const address = `127.0.0.${++clientIndex}`;
@@ -34,7 +36,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
         url: '/api/auth/register',
         remoteAddress: address,
         headers: { origin },
-        payload: { email, password, ...identity, storeName: 'Doris Test' },
+        payload: { email, password, ...identity, storeName },
       });
       expect(registration.statusCode).toBe(200);
       const account = registration.json() as LocalAccount;
@@ -198,9 +200,19 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       );
       expect((await readSnapshot(db, o.account.storeId)).sales).toHaveLength(1);
     }, 30_000);
-    it('rejects cross-account access, forged totals and operation-ID payload changes atomically', async () => {
+    it('keeps stores with identical names separate and rejects cross-account access, forged totals and changed operation IDs', async () => {
       const o = await owner(),
         other = await owner();
+      expect(o.account.storeName).toBe(other.account.storeName);
+      expect(o.account.storeId).not.toBe(other.account.storeId);
+      expect(await o.request('/auth/me')).toMatchObject({
+        storeId: o.identity.storeId,
+        storeName: 'Shopjot Test',
+      });
+      expect(await other.request('/auth/me')).toMatchObject({
+        storeId: other.identity.storeId,
+        storeName: 'Shopjot Test',
+      });
       const sale = await saveSale(saleInput(), o.local);
       const op = (await o.local.outbox.toArray())[0],
         wire = await toWire(op, o.local);

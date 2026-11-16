@@ -1,7 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
+import { createStore } from '../helpers/store';
 
 async function readyOffline(page: Page) {
-  await page.goto('/');
+  await createStore(page);
   await expect(page.getByRole('heading', { name: 'Your shop, at a glance.' })).toBeVisible();
   await page.evaluate(async () => {
     await navigator.serviceWorker.ready;
@@ -113,7 +114,7 @@ test('stock link is explicit, stock counts survive reload, and CSV export works'
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export sales CSV' }).click();
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toMatch(/doris-foods-sales.*\.csv/);
+  expect(download.suggestedFilename()).toMatch(/shopjot-sales.*\.csv/);
 });
 
 test('360px sale form stays usable and rejects missing required fields', async ({ page }) => {

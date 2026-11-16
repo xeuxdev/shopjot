@@ -106,7 +106,7 @@ export function createApp(options: Options = {}) {
   });
   const health = async () => ({
     status: 'ok',
-    service: 'doris-foods-api',
+    service: 'shopjot-api',
     cloudBackupAvailable: true,
   });
   app.get('/health', health);

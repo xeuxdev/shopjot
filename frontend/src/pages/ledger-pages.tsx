@@ -118,7 +118,7 @@ export function Home({ data }: { data: Ledger }) {
     <>
       <div className="page-heading home-heading">
         <div>
-          <p className="subtle greeting">Your everyday store companion</p>
+          <p className="subtle greeting">{data.store?.name}</p>
           <h1>Your shop, at a glance.</h1>
           <p className="heading-description">Every sale recorded. Every naira accounted for.</p>
         </div>
@@ -970,11 +970,19 @@ export function Settings({ data, notify }: { data: Ledger; notify: (message: str
           <ErrorMessage message={error} />
         </section>
         <section className="panel form-section">
-          <h2>About this build</h2>
+          <h2>Your store</h2>
           <dl className="about-list">
             <div>
               <dt>Store</dt>
-              <dd>Doris Foods</dd>
+              <dd className="store-name">{data.store?.name}</dd>
+            </div>
+            <div>
+              <dt>Store ID</dt>
+              <dd className="store-id">{data.identity.storeId}</dd>
+            </div>
+            <div>
+              <dt>Backup account</dt>
+              <dd>{data.account ? data.account.email : 'Not connected · local use'}</dd>
             </div>
             <div>
               <dt>Currency</dt>

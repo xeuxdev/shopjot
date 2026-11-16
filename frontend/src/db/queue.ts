@@ -1,6 +1,7 @@
 import type { OutboxOperation } from '../domain/index';
 import type { DeviceIdentity, LedgerDB } from './database';
 import type { LocalAccount } from './sync-state';
+import type { StoreProfile } from './store';
 
 export async function assertCanWrite(database: LedgerDB) {
   const account = (await database.metadata.get('account'))?.value as LocalAccount | undefined;
@@ -12,6 +13,10 @@ export async function assertCanWrite(database: LedgerDB) {
     throw new Error(
       'This phone is in read-only mode. Review the device switch in Settings before recording changes.',
     );
+  const store = (await database.metadata.get('store'))?.value as StoreProfile | undefined;
+  const identity = (await database.metadata.get('identity'))?.value as DeviceIdentity;
+  if (!store || store.id !== identity.storeId)
+    throw new Error('Create your store before recording changes.');
 }
 export async function enqueue(
   database: LedgerDB,

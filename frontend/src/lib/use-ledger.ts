@@ -1,5 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type DeviceIdentity } from '../db/database';
+import type { StoreProfile } from '../db/store';
 import { initialSyncState, type LocalAccount, type SyncState } from '../db/sync-state';
 export function useLedger() {
   return useLiveQuery(async () => {
@@ -8,6 +9,7 @@ export function useLedger() {
     const identity = saved.value as DeviceIdentity;
     return db.transaction('r', db.tables, async () => ({
       identity,
+      store: (await db.metadata.get('store'))?.value as StoreProfile | undefined,
       account: (await db.metadata.get('account'))?.value as LocalAccount | undefined,
       sync: ((await db.metadata.get('sync'))?.value as SyncState | undefined) ?? initialSyncState,
       customers: await db.customers.where('storeId').equals(identity.storeId).sortBy('name'),
