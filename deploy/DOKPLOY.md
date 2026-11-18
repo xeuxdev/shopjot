@@ -75,6 +75,8 @@ This rollout requires no new PostgreSQL migration. Existing databases and browse
 
 Deploy the frontend and backend independently. Each build context contains only that application's folder and lockfile. A frontend change never needs a backend build, and a backend change never needs a frontend build.
 
+For shared-login sales on multiple phones, deploy the updated **backend first**, then the frontend. Each phone signs in with the same store email/password, finishes its initial restore, and can record sales without claiming a primary-phone role. Existing records and sessions remain valid, and no new database migration is required for this change. Installed apps may need their **Update app** action or a reload to receive the new interface.
+
 If replacing the older Compose deployment:
 
 1. Use the **same Neon database** for the new backend.
@@ -91,7 +93,7 @@ The API schema, operation IDs, retry logic, and browser database name are unchan
 - Backend readiness: `https://api.example.com/api/ready`
 - Refresh `https://shop.example.com/sales/new` directly.
 - Record a fictional sale offline, reload, reconnect, and wait for **Backed up**.
-- On a fresh browser/device, sign in and restore. The replacement starts read-only until explicit primary-device takeover.
+- On a fresh browser/device, sign in with the same store account and finish restoring. Record a sale from each phone and confirm that both can sync without a primary-phone takeover.
 
 Reliable sync retains pending changes until matching acknowledgment, verifies complete ledger counts/checksum, and retries without duplicating money or stock. Browser execution after closing remains best-effort; the queue resumes whenever the app or service worker can run. Records lost from a phone before server acknowledgment cannot be recovered from the server.
 

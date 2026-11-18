@@ -76,7 +76,6 @@ describe('connecting a store to backup', () => {
   });
   it('restores the authenticated store’s identity and name on a fresh browser', async () => {
     const restored = await response(crypto.randomUUID());
-    restored.writer = false;
     await connectAccount('login', email, password, false, {
       database,
       request: async () => restored,
@@ -89,7 +88,7 @@ describe('connecting a store to backup', () => {
     });
     expect((await database.metadata.get('account'))?.value).toMatchObject({
       restoreReady: false,
-      writer: false,
+      writer: true,
     });
   });
   it('never adopts another store when this browser has local records', async () => {

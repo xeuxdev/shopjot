@@ -120,7 +120,7 @@ async function applyOperation(tx: Transaction, op: SyncOperation) {
     await emit(tx, { entity: 'units', record: unit });
     await insertMovement(tx, movement);
   } else if (op.kind === 'sale.create') {
-    const { sale, customer, items, payment, movements, allowNegativeStock } = op.payload;
+    const { sale, customer, items, payment, movements } = op.payload;
     requireRule(
       sale.status === 'active' && sale.customerId === customer.id,
       'A new sale must have an active customer association.',
@@ -206,10 +206,9 @@ async function applyOperation(tx: Transaction, op: SyncOperation) {
         'Invalid sale stock movement.',
       );
       const remaining = decimalToMilli(unit.quantityOnHand) - decimalToMilli(item.quantity);
-      requireRule(
-        remaining >= 0n || allowNegativeStock,
-        'The sale exceeds stock without an explicit shortage override.',
-      );
+      // Other phones may have sold against the same offline stock count. Keep
+      // every real sale and its exact movement; a shortage remains visible as
+      // negative stock instead of leaving a paid sale stranded on its phone.
       const [updated] = await tx
         .update(s.productUnits)
         .set({ quantityOnHand: milliToDecimal(remaining), updatedAt: new Date(sale.createdAt) })
@@ -267,8 +266,8 @@ export async function pushOperation(db: Database, account: AuthAccount, operatio
     );
   return db.transaction(async (tx) => {
     // This also orders per-store change cursors by commit, avoiding skipped uncommitted IDs.
-    const [store] = await tx
-      .select()
+    await tx
+      .select({ id: s.stores.id })
       .from(s.stores)
       .where(eq(s.stores.id, account.storeId))
       .for('update');
@@ -292,12 +291,6 @@ export async function pushOperation(db: Database, account: AuthAccount, operatio
         );
       return previous.result;
     }
-    if (store.primaryDeviceId !== operation.deviceId)
-      throw new ApiError(
-        409,
-        'DEVICE_REPLACED',
-        'Another phone is now the primary editor. Keep this phone’s unbacked records and review them before switching devices.',
-      );
     await applyOperation(tx, operation);
     const result = {
       operationId: operation.operationId,

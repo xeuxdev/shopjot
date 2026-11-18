@@ -122,10 +122,7 @@ export function Home({ data }: { data: Ledger }) {
           <h1>Your shop, at a glance.</h1>
           <p className="heading-description">Every sale recorded. Every naira accounted for.</p>
         </div>
-        <Button
-          disabled={!!data.account && !data.account.writer}
-          onClick={() => navigate('/sales/new')}
-        >
+        <Button onClick={() => navigate('/sales/new')}>
           <Plus size={19} />
           Record sale
         </Button>
@@ -306,10 +303,7 @@ export function Sales({ data }: { data: Ledger }) {
           <h1>Sales</h1>
           <p className="heading-description">The goods, the customer, and every payment.</p>
         </div>
-        <Button
-          disabled={!!data.account && !data.account.writer}
-          onClick={() => navigate('/sales/new')}
-        >
+        <Button onClick={() => navigate('/sales/new')}>
           <Plus size={18} />
           Record sale
         </Button>
@@ -463,7 +457,6 @@ export function SaleDetail({ data, notify }: { data: Ledger; notify: (message: s
           </div>
           {owed > 0 && (
             <Button
-              disabled={!!data.account && !data.account.writer}
               className="full-width"
               onClick={() => {
                 setError('');
@@ -708,7 +701,6 @@ export function Stock({ data, notify }: { data: Ledger; notify: (message: string
           </p>
         </div>
         <Button
-          disabled={!!data.account && !data.account.writer}
           onClick={() => {
             setError('');
             setOpen(true);
@@ -741,7 +733,6 @@ export function Stock({ data, notify }: { data: Ledger; notify: (message: string
                 <Button
                   size="sm"
                   variant="ghost"
-                  disabled={!!data.account && !data.account.writer}
                   onClick={() => {
                     setAdjusting(u.id);
                     setCount(u.quantityOnHand);
@@ -758,11 +749,7 @@ export function Stock({ data, notify }: { data: Ledger; notify: (message: string
             title={data.units.length ? 'No matching stock' : 'Start with what’s on your shelves'}
             action={
               !data.units.length && (
-                <Button
-                  variant="outline"
-                  disabled={!!data.account && !data.account.writer}
-                  onClick={() => setOpen(true)}
-                >
+                <Button variant="outline" onClick={() => setOpen(true)}>
                   <Plus size={16} />
                   Add your first item
                 </Button>

@@ -92,7 +92,7 @@ Before a production release that changes these rules, run both applications' tes
 - Store names can repeat. Every store has its own stable UUID, shown in Settings and included in exports.
 - A guest store works offline without registration. Pending changes stay local until its owner registers an account.
 - Registration attaches the current name and ID to an owner email/password account, then backs up the existing ledger. It does not generate a replacement store ID.
-- Login on a fresh browser restores the server's name, ID and records. Restored phones remain read-only until explicit primary-device takeover.
+- Login on a fresh browser restores the server's name, ID and records. Once the restore is verified, every phone signed in with the store's shared email/password can record sales. Signing in on another phone does not disable existing phones.
 - Local records, drafts or queue entries prevent a different store from replacing that ledger during sign-in. A signed-out registered ledger remains locked until its owner signs in again.
 - Each browser profile holds one local store; each account currently owns one store. Multiple independent stores can use the same deployed Shopjot service.
 
@@ -104,6 +104,8 @@ Every sale requires a customer and accepts freely typed goods and units. Money i
 
 Sync resumes on writes, startup, reconnect, foregrounding, periodic checks, and supported background-sync events. Browsers control execution after an app closes; pending records remain queued until it can run again. A lost or cleared phone can still lose unacknowledged records. Keep exports as an extra copy.
 
-Replacement phones restore in read-only mode and require explicit primary-device takeover. JSON import, audited correction/voiding UI, and password reset remain follow-up work. Local browser data is not encrypted by this app.
+Phones finish their initial restore before creating new records. Sales saved on different phones merge by unique operation IDs, and the server records the originating device. If offline phones sell against the same stock count, both sales are kept and their movements can produce a visible negative stock count. Conflicting repayments or stale absolute stock adjustments are kept locally and flagged for review; they cannot silently overpay a sale or overwrite newer stock history. A shared login identifies the store account, not the individual storekeeper.
+
+JSON import, audited correction/voiding UI, and password reset remain follow-up work. Local browser data is not encrypted by this app.
 
 The original [handoff](Doris_Foods_Codex_Handoff.md) remains product context; this independent-folder layout follows the user's later instruction and replaces its suggested workspace layout. See [implementation status](IMPLEMENTATION_STATUS.md) for verification details.

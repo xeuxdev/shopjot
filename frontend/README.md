@@ -39,6 +39,8 @@ For a connected check, run both applications against an isolated test database, 
 
 The first screen creates a named guest store offline or signs in to restore an existing store. Registration later uses that exact store ID and name; guest use does not call the backup API. Store names and IDs appear in Settings and JSON exports.
 
+Storekeepers can sign in on separate phones using the same store email/password. After the initial restore finishes, every signed-in phone can record sales and receive shared ledger updates through sync. Signing in or signing out on one phone does not disable another phone. Offline stock shortages reconcile as visible negative stock without discarding saved sales; conflicting repayments remain flagged for review rather than overpaying a sale.
+
 **Settings & data → Export transactions PDF** downloads a report of all saved sales with the store name/ID, received amounts, outstanding balances, summary totals, and page numbers. PDF and CSV amounts are in Nigerian naira with two decimal places. Dates use `DD/MM/YYYY, hh:mm:ss am/pm` in `Africa/Lagos`, for example `18/11/2026, 01:40:43 pm`. JSON backups and stored records retain integer kobo and ISO timestamps. PDF generation and its bundled fonts work offline once the production app has been cached.
 
 Existing phone data remains at the same frontend origin and IndexedDB name. The money/sync contract lives locally in `src/domain/`; the repository's optional contract check and integration tests detect differences from the API's copy without coupling deployment builds.

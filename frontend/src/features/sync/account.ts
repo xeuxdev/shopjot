@@ -88,15 +88,3 @@ export async function signOut() {
   const account = (await db.metadata.get('account'))?.value as LocalAccount;
   await db.metadata.put({ key: 'account', value: { ...account, signedOut: true } });
 }
-export async function claimDevice() {
-  const identity = await getIdentity();
-  const account = accountResponseSchema.parse(
-    await requestJson('/devices/claim', {
-      method: 'POST',
-      body: JSON.stringify({ deviceId: identity.deviceId, confirmPreviousDeviceBackedUp: true }),
-    }),
-  );
-  const saved = (await db.metadata.get('account'))?.value as LocalAccount;
-  await db.metadata.put({ key: 'account', value: { ...saved, ...account } });
-  requestSync();
-}

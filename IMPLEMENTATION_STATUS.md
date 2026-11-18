@@ -1,4 +1,4 @@
-# Implementation status — 16 November 2026
+# Implementation status — 18 November 2026
 
 Shopjot is now a multi-store offline ledger with optional owner accounts for verified backup. The original handoff remains product context; the later requirements replace the single-store branding and add named-store setup. Frontend and backend remain independently deployable in Dokploy, with Neon PostgreSQL behind the API.
 
@@ -13,7 +13,7 @@ Shopjot is now a multi-store offline ledger with optional owner accounts for ver
 | Accounts         | Owner registration/login, scrypt password hashes, opaque HttpOnly/Secure/SameSite sessions, origin checks, rate limiting, logout                                        |
 | Sync             | Durable ordered outbox; transactionally acknowledged idempotent pushes; paginated pulls; backoff/jitter; startup/reconnect/foreground/manual/native background triggers |
 | Verification     | Server cursor, counts, and complete SHA-256 ledger checksum before claiming “Backed up”                                                                                 |
-| Recovery         | Verified restore on a replacement device, initially read-only; explicit primary-device takeover                                                                         |
+| Recovery         | Verified restore on additional devices; every phone using the shared store login can record sales                                                                         |
 | Deployment       | Two independent Dokploy Applications; static Nginx frontend calls the API URL directly; credentialed CORS; Neon pooled/direct runtime URLs; locked startup migrations   |
 | Data safety      | Store-scoped CSV/JSON exports, persistent storage request, clear pending/error/backup state; no credential export                                                       |
 
@@ -21,7 +21,7 @@ Shopjot is now a multi-store offline ledger with optional owner accounts for ver
 
 A first-time user can create a store with just a name, without an account or an API request. Its cryptographically generated UUID stays attached to its local sales, payments, customers, stock, drafts and ordered outbox. Names can repeat across stores; IDs cannot. The name and full ID appear in Settings and JSON exports; export filenames include the store ID.
 
-Registration sends this existing ID and the chosen name to the backend and signs in its owner. It keeps queued operations and begins verified backup. Login on a fresh browser adopts the server's name and ID, restores the ledger, and initially leaves the replacement read-only. Server authentication sets the store scope; supplying someone else's ID in a request cannot select their ledger.
+Registration sends this existing ID and the chosen name to the backend and signs in its owner. It keeps queued operations and begins verified backup. Login on a fresh browser adopts the server's name and ID and verifies the restored ledger before accepting new changes. Every signed-in phone can then record sales; additional logins do not disable other phones. Server authentication sets the store scope; supplying someone else's ID in a request cannot select their ledger.
 
 All local records and meaningful drafts are checked before switching to another store ID. A draft entered while a sign-in request is in flight also prevents replacement. An authentication check that finishes after sign-out cannot unlock the ledger or resume backup. Each browser profile currently holds one local store, and each account owns one store; the deployed service serves many independent stores.
 
@@ -39,7 +39,15 @@ Pull collapses paginated absolute records and applies them in one IndexedDB tran
 
 Web Locks coordinate tabs and service workers and release automatically on termination. A persistent lease provides a bounded fallback for browsers without Web Locks. Browser testing caught and resolved stale-lease behavior after hard navigation; retry triggers that arrive during an active run are coalesced rather than lost.
 
-## Verification after multi-store setup
+## Verification after shared-phone sign-in — 18 November 2026
+
+- Frontend: **57 tests passed**, including writing from a restored phone with a legacy read-only flag, while signed-out and incomplete restores remain blocked.
+- Backend: **19 tests passed**, including real PostgreSQL constraints.
+- Client/server sync: **10 tests passed** against isolated PostgreSQL, including concurrent sales from two devices, retained payments and negative stock when both offline phones sell the last unit, conflicting repayments retained for review, and independent logout. The two shared-phone cases passed again with fully paid sales.
+- Browser: **22 tests passed**, including creating sales on both phones with the same login, cross-phone ledger updates, offline recovery, PDF/CSV exports, installation UI, and accessibility.
+- Both builds, type checks, lint, and the domain-copy check passed. Deploy the backend first, then the frontend; this change adds no database migration.
+
+## Verification after multi-store setup — 16 November 2026
 
 - `npm --prefix frontend run typecheck`, `lint`, and `build`: passed, including the custom service worker. The build uses an explicit `VITE_API_URL`.
 - `npm --prefix frontend test`: **35 tests passed**, covering store creation, legacy adoption, guest registration, identity preservation, in-flight draft safety and sign-out races.

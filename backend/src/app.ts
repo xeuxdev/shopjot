@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import {
   z,
   ZodError,
@@ -175,7 +175,7 @@ export function createApp(options: Options = {}) {
         storeId: store.id,
         storeName: store.name,
         deviceId: input.deviceId,
-        writer: store.primaryDeviceId === input.deviceId,
+        writer: true,
       });
     },
   );
@@ -193,17 +193,8 @@ export function createApp(options: Options = {}) {
       .parse(request.body);
     if (body.deviceId !== account.deviceId)
       throw new ApiError(403, 'DEVICE_MISMATCH', 'Sign in on this device before switching.');
-    await db.transaction(async (tx) => {
-      await tx
-        .select({ id: stores.id })
-        .from(stores)
-        .where(eq(stores.id, account.storeId))
-        .for('update');
-      await tx
-        .update(stores)
-        .set({ primaryDeviceId: body.deviceId })
-        .where(and(eq(stores.id, account.storeId), eq(stores.ownerUserId, account.userId)));
-    });
+    // Older installed clients may still call this endpoint. Signing in already
+    // enables writing, and this request must never disable another phone.
     return accountResponseSchema.parse({ ...account, writer: true });
   });
   app.post('/api/sync/push', async (request) =>

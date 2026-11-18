@@ -103,12 +103,12 @@ test.describe('connected backup and recovery', () => {
       await restored.getByLabel('Owner email').fill(email);
       await restored.getByLabel('Password', { exact: true }).fill(password);
       await restored.getByRole('button', { name: 'Sign in and restore', exact: true }).click();
-      await expect(restored.locator('.backup-pill')).toHaveText('Read-only phone', {
+      await expect(restored.locator('.backup-pill')).toHaveText('Backed up', {
         timeout: 30_000,
       });
       await expect(
         restored.getByRole('button', { name: 'Make this the primary phone' }),
-      ).toBeVisible();
+      ).toHaveCount(0);
       await expect(restored.locator('.store-id')).toHaveText(originalStoreId);
       await expect(restored.locator('.store-name')).toHaveText('Chika Family Stores');
       await restored.goto(new URL('/', firstSaleUrl).href);
@@ -118,14 +118,39 @@ test.describe('connected backup and recovery', () => {
       await restored.goto(new URL('/stock', firstSaleUrl).href);
       await expect(restored.locator('.stock-row .row-amount > strong')).toHaveText('12.5 mudu');
       await restored.goto(new URL('/settings', firstSaleUrl).href);
-      await restored.getByLabel('I have backed up the previous phone').check();
-      await restored.getByRole('button', { name: 'Make this the primary phone' }).click();
+      await restored.goto(new URL('/sales/new', firstSaleUrl).href);
+      await restored.getByLabel('Customer name').fill('Ada');
+      await restored.getByLabel('Item name').fill('Beans');
+      await restored.getByLabel('Quantity', { exact: true }).fill('1');
+      await restored.getByLabel('Unit / label').fill('bag');
+      await restored.getByLabel('Price per unit (₦)').fill('1000');
+      await restored.getByRole('button', { name: 'Save sale', exact: true }).click();
+      await expect(restored.locator('.receipt-total strong')).toHaveText('₦1,000');
       await expect(restored.locator('.backup-pill')).toHaveText('Backed up', { timeout: 30_000 });
+      // The original phone remains writable after the second phone signs in.
+      await page.goto('/settings');
+      await page.getByRole('button', { name: 'Retry backup / verify records' }).click();
+      await expect(page.locator('.backup-pill')).toHaveText('Backed up', { timeout: 30_000 });
+      await page.goto('/sales/new');
+      await page.getByLabel('Customer name').fill('Ngozi');
+      await page.getByLabel('Item name').fill('Salt');
+      await page.getByLabel('Quantity', { exact: true }).fill('1');
+      await page.getByLabel('Unit / label').fill('pack');
+      await page.getByLabel('Price per unit (₦)').fill('250');
+      await page.getByRole('button', { name: 'Save sale', exact: true }).click();
+      await expect(page.locator('.receipt-total strong')).toHaveText('₦250');
+      await expect(page.locator('.backup-pill')).toHaveText('Backed up', { timeout: 30_000 });
+      await restored.goto(new URL('/settings', firstSaleUrl).href);
+      await restored.getByRole('button', { name: 'Retry backup / verify records' }).click();
+      await expect(restored.locator('.backup-pill')).toHaveText('Backed up', { timeout: 30_000 });
+      await restored.goto(new URL('/', firstSaleUrl).href);
+      await expect(restored.locator('.sales-stat .stat-value')).toHaveText('₦8,750');
+      await expect(restored.locator('.stat .stat-value').last()).toHaveText('₦1,000');
     } finally {
       await replacement.close();
     }
     await page.goto('/settings');
     await page.getByRole('button', { name: 'Retry backup / verify records' }).click();
-    await expect(page.locator('.backup-pill')).toHaveText('Read-only phone', { timeout: 30_000 });
+    await expect(page.locator('.backup-pill')).toHaveText('Backed up', { timeout: 30_000 });
   });
 });

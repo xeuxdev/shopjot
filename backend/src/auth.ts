@@ -67,7 +67,6 @@ export async function authenticate(db: Database, request: FastifyRequest) {
       storeId: stores.id,
       storeName: stores.name,
       deviceId: sessions.deviceId,
-      primaryDeviceId: stores.primaryDeviceId,
     })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
@@ -80,7 +79,7 @@ export async function authenticate(db: Database, request: FastifyRequest) {
       'SIGN_IN_REQUIRED',
       'Sign in again to continue backing up. Your local records are safe.',
     );
-  return { ...account, writer: account.primaryDeviceId === account.deviceId };
+  return { ...account, writer: true };
 }
 export type AuthAccount = Awaited<ReturnType<typeof authenticate>>;
 export async function endSession(

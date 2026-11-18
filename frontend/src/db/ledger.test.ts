@@ -42,6 +42,24 @@ afterEach(async () => {
 });
 
 describe('atomic local ledger', () => {
+  it('allows an already restored phone with a legacy read-only flag to save sales', async () => {
+    const identity = await getIdentity(database);
+    const account = {
+      ...identity,
+      userId: id(),
+      email: 'owner@example.test',
+      storeName: 'Test shop',
+      writer: false,
+      restoreReady: true,
+    };
+    await database.metadata.put({ key: 'account', value: account });
+    expect((await saveSale(input(), database)).totalKobo).toBe(1150000);
+    await database.metadata.put({ key: 'account', value: { ...account, restoreReady: false } });
+    await expect(saveSale(input(), database)).rejects.toThrow('restore');
+    await database.metadata.put({ key: 'account', value: { ...account, signedOut: true } });
+    await expect(saveSale(input(), database)).rejects.toThrow('Sign in');
+    expect(await database.sales.count()).toBe(1);
+  });
   it('saves a sale, customer, items, payment and queue atomically and survives reopen', async () => {
     const sale = await saveSale(input(), database);
     expect(sale.totalKobo).toBe(1150000);
@@ -262,7 +280,7 @@ describe('explicit inventory association', () => {
     );
     expect(await database.productUnits.count()).toBe(1);
   });
-  it('keeps a stable primary-device identity across restarts', async () => {
+  it('keeps a stable device identity across restarts', async () => {
     const first = await getIdentity(database);
     expect(await getIdentity(database)).toEqual(first);
   });

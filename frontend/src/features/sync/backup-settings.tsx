@@ -3,7 +3,7 @@ import { RefreshCw, ShieldCheck } from 'lucide-react';
 import { Button, ErrorMessage } from '../../components/ui';
 import type { Ledger } from '../../lib/use-ledger';
 import { userMessage } from '../../lib/errors';
-import { claimDevice, connectAccount, signOut } from './account';
+import { connectAccount, signOut } from './account';
 import { runSync } from './engine';
 
 export function backupLabel(data: Ledger, online = true) {
@@ -13,7 +13,6 @@ export function backupLabel(data: Ledger, online = true) {
   if (data.sync.status === 'syncing') return 'Syncing';
   if (data.sync.status === 'failed') return 'Backup needs attention';
   if (data.sync.status === 'auth_required') return 'Sign in to back up';
-  if (!data.account.writer) return 'Read-only phone';
   if (data.pending || data.sync.status === 'retry') return 'Saved on this phone';
   return data.sync.lastBackupAt ? 'Backed up' : 'Saved on this phone';
 }
@@ -27,8 +26,7 @@ export function BackupSettings({
   const [mode, setMode] = useState<'register' | 'login'>('register');
   const [email, setEmail] = useState(''),
     [password, setPassword] = useState('');
-  const [adopt, setAdopt] = useState(false),
-    [takeover, setTakeover] = useState(false);
+  const [adopt, setAdopt] = useState(false);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   const account = data.account;
@@ -56,18 +54,6 @@ export function BackupSettings({
       if (result === 'done') notify('Every ledger record has been verified with the server');
     } catch (error) {
       setError(userMessage(error, 'Backup could not finish.'));
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function switchPhone() {
-    setBusy(true);
-    setError('');
-    try {
-      await claimDevice();
-      notify('This is now the primary editing phone');
-    } catch (error) {
-      setError(userMessage(error, 'Could not switch devices.'));
     } finally {
       setBusy(false);
     }
@@ -135,7 +121,7 @@ export function BackupSettings({
               ? 'Sign in again to resume backup. Your offline records are still on this phone.'
               : mode === 'register'
                 ? 'An account is only needed for backup. Register this store to back up every saved record; your store ID stays the same.'
-                : 'Sign in to restore your backed-up store. A new phone starts in read-only mode until you explicitly switch devices.'}
+                : 'Sign in with the store’s shared account. Once its records finish downloading, this phone can record sales alongside the other signed-in phones.'}
           </p>
           <div className="field">
             <label htmlFor="account-email">Owner email</label>
@@ -190,30 +176,10 @@ export function BackupSettings({
             <RefreshCw size={16} />
             Retry backup / verify records
           </Button>
-          {!account.writer && (
-            <div className="device-switch">
-              <h3>Use this phone for new records</h3>
-              <p className="quiet-note">
-                Only one phone can upload new changes. First back up the previous phone. Unbacked
-                changes left there cannot be recovered from the server.
-              </p>
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={takeover}
-                  onChange={(e) => setTakeover(e.target.checked)}
-                />
-                I have backed up the previous phone, or understand that its unbacked changes still
-                need to be recovered separately.
-              </label>
-              <Button
-                disabled={!takeover || busy || !account.restoreReady}
-                onClick={() => void switchPhone()}
-              >
-                Make this the primary phone
-              </Button>
-            </div>
-          )}
+          <p className="quiet-note">
+            Every phone signed in to this store can record sales. Changes from the other phones
+            appear when this phone reconnects and syncs.
+          </p>
           <p className="quiet-note">
             Signing out keeps all local records and pending changes. You need internet to sign back
             in.

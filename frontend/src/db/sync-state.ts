@@ -4,8 +4,7 @@ export interface LocalAccount extends AccountResponse {
   signedOut?: boolean;
 }
 export interface SyncState {
-  status:
-    'local' | 'syncing' | 'backed_up' | 'retry' | 'failed' | 'auth_required' | 'device_blocked';
+  status: 'local' | 'syncing' | 'backed_up' | 'retry' | 'failed' | 'auth_required';
   cursor: string;
   lastBackupAt?: string;
   error?: string;

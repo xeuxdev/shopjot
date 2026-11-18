@@ -37,6 +37,7 @@ export const stores = pgTable('stores', {
     .notNull(),
   name: text().notNull(),
   timezone: text().default('Africa/Lagos').notNull(),
+  // Legacy column retained for existing installations; all signed-in devices can write.
   primaryDeviceId: uuid('primary_device_id'),
   createdAt: createdAt(),
 });

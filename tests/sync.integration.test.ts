@@ -66,6 +66,28 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
         return response.json();
       };
     }
+    async function anotherPhone(o: Awaited<ReturnType<typeof owner>>) {
+      const local = new LedgerDB(`shared-phone-${crypto.randomUUID()}`);
+      locals.push(local);
+      const identity = await getIdentity(local);
+      const login = await app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        remoteAddress: o.address,
+        headers: { origin },
+        payload: { email: o.email, password, deviceId: identity.deviceId },
+      });
+      expect(login.statusCode).toBe(200);
+      expect(login.json().writer).toBe(true);
+      const cookie = `doris_session=${login.cookies.find((c) => c.name === 'doris_session')!.value}`;
+      const signedInIdentity = { ...identity, storeId: o.account.storeId };
+      await local.metadata.bulkPut([
+        { key: 'identity', value: signedInIdentity },
+        { key: 'account', value: { ...login.json<LocalAccount>(), restoreReady: false } },
+      ]);
+      const request = transport(cookie, o.address);
+      return { local, identity: signedInIdentity, login, cookie, request };
+    }
     const saleInput = (unitId: string | null = null): SaleInput => ({
       id: crypto.randomUUID(),
       operationId: crypto.randomUUID(),
@@ -113,7 +135,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       await app.close();
       await pool.end();
     });
-    it('backs up every entity, retries a response lost after commit, restores a new phone and enforces device takeover', async () => {
+    it('backs up every entity, retries lost responses, and lets both signed-in phones record sales', async () => {
       const o = await owner();
       await registerStock('Rice', 'mudu', '15', 350000, crypto.randomUUID(), o.local);
       const unit = (await o.local.productUnits.toArray())[0];
@@ -154,56 +176,62 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       expect(
         (await o.local.metadata.toArray()).some((r) => canonicalJson(r).includes(password)),
       ).toBe(false);
-      const replacement = new LedgerDB(`restore-${crypto.randomUUID()}`);
-      locals.push(replacement);
-      const replacementIdentity = await getIdentity(replacement);
-      const login = await app.inject({
-        method: 'POST',
-        url: '/api/auth/login',
-        remoteAddress: o.address,
-        headers: { origin },
-        payload: { email: o.email, password, deviceId: replacementIdentity.deviceId },
-      });
-      expect(login.statusCode).toBe(200);
-      expect(login.json().writer).toBe(false);
-      const replacementCookie = `doris_session=${login.cookies.find((c) => c.name === 'doris_session')!.value}`;
+      const phone = await anotherPhone(o);
+      const replacement = phone.local;
+      const login = phone.login;
       expect(login.headers['set-cookie']).toContain('HttpOnly');
       expect(login.headers['set-cookie']).toContain('SameSite=Strict');
-      await replacement.metadata.put({
-        key: 'identity',
-        value: { ...replacementIdentity, storeId: o.account.storeId },
-      });
-      await replacement.metadata.put({
-        key: 'account',
-        value: { ...login.json<LocalAccount>(), restoreReady: false },
-      });
+      await expect(saveSale(saleInput(), replacement)).rejects.toThrow('restore');
       expect(
         await runSync({
           database: replacement,
-          request: transport(replacementCookie),
+          request: phone.request,
           force: true,
         }),
       ).toBe('done');
       expect(snapshotJson(await localSnapshot(replacement, o.account.storeId))).toBe(
         snapshotJson(remote),
       );
-      await expect(saveSale(saleInput(), replacement)).rejects.toThrow('read-only');
+      // A legacy client's claim request must not revoke the first phone's access.
       const claim = await app.inject({
         method: 'POST',
         url: '/api/devices/claim',
-        headers: { origin, cookie: replacementCookie },
-        payload: { deviceId: replacementIdentity.deviceId, confirmPreviousDeviceBackedUp: true },
+        headers: { origin, cookie: phone.cookie },
+        payload: { deviceId: phone.identity.deviceId, confirmPreviousDeviceBackedUp: true },
       });
       expect(claim.statusCode).toBe(200);
-      await saveSale(saleInput(), o.local); // Old phone still offline and unaware of takeover.
-      expect(await runSync({ database: o.local, request: o.request, force: true })).toBe('blocked');
-      expect((await o.local.metadata.get('sync'))?.value).toMatchObject({
-        status: 'device_blocked',
-      });
-      expect((await o.local.outbox.toArray()).filter((op) => op.status === 'pending')).toHaveLength(
-        1,
+      expect(await o.request('/auth/me')).toMatchObject({ writer: true });
+      await Promise.all([saveSale(saleInput(), o.local), saveSale(saleInput(), replacement)]);
+      await Promise.all([
+        runSync({ database: o.local, request: o.request, force: true }),
+        runSync({ database: replacement, request: phone.request, force: true }),
+      ]);
+      // A phone may need another pass when the other phone commits during pull/verification.
+      expect(await runSync({ database: o.local, request: o.request, force: true })).toBe('done');
+      expect(await runSync({ database: replacement, request: phone.request, force: true })).toBe(
+        'done',
       );
-      expect((await readSnapshot(db, o.account.storeId)).sales).toHaveLength(1);
+      const shared = await readSnapshot(db, o.account.storeId);
+      expect(shared.sales).toHaveLength(3);
+      for (const local of [o.local, replacement]) {
+        expect(snapshotJson(await localSnapshot(local, o.account.storeId))).toBe(
+          snapshotJson(shared),
+        );
+        expect((await local.outbox.toArray()).every((op) => op.status === 'acknowledged')).toBe(
+          true,
+        );
+        expect((await local.metadata.get('sync'))?.value).toMatchObject({ status: 'backed_up' });
+      }
+      const operations = await db
+        .select()
+        .from(tables.processedSyncOperations)
+        .where(eq(tables.processedSyncOperations.storeId, o.account.storeId));
+      expect(new Set(operations.map((op) => op.deviceId))).toEqual(
+        new Set([o.identity.deviceId, phone.identity.deviceId]),
+      );
+      await o.request('/auth/logout', { method: 'POST', body: '{}' });
+      await expect(o.request('/auth/me')).rejects.toMatchObject({ status: 401 });
+      expect(await phone.request('/auth/me')).toMatchObject({ writer: true });
     }, 30_000);
     it('keeps stores with identical names separate and rejects cross-account access, forged totals and changed operation IDs', async () => {
       const o = await owner(),
@@ -377,38 +405,80 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       await o.request('/sync/push', { method: 'POST', body: JSON.stringify(wire) });
       expect((await readSnapshot(db, o.account.storeId)).sales).toHaveLength(1);
     }, 30_000);
-    it('serializes competing sales so only one can consume the last stock', async () => {
+    it('keeps sales from two offline phones when they both sell against the last stock count', async () => {
       const o = await owner();
       await registerStock('Rice', 'mudu', '1', 100, crypto.randomUUID(), o.local);
       expect(await runSync({ database: o.local, request: o.request, force: true })).toBe('done');
       const unit = (await o.local.productUnits.toArray())[0];
+      const phone = await anotherPhone(o);
+      expect(await runSync({ database: phone.local, request: phone.request, force: true })).toBe(
+        'done',
+      );
       const raw = saleInput(unit.id);
       raw.items = [{ ...raw.items[0], quantity: '1', unitPriceKobo: 100 }];
-      raw.initialPaymentKobo = 0;
-      await saveSale(raw, o.local);
-      const queued = (await o.local.outbox.toArray()).find((op) => op.kind === 'sale.create')!;
-      const first = await toWire(queued, o.local);
-      if (first.kind !== 'sale.create') throw new Error('Expected sale');
-      const second = structuredClone(first);
-      second.operationId = crypto.randomUUID();
-      second.payload.sale.id = crypto.randomUUID();
-      second.payload.items[0].id = crypto.randomUUID();
-      second.payload.items[0].saleId = second.payload.sale.id;
-      second.payload.movements[0].id = crypto.randomUUID();
-      second.payload.movements[0].saleItemId = second.payload.items[0].id;
-      const results = await Promise.allSettled(
-        [first, second].map((wire) =>
-          o.request('/sync/push', { method: 'POST', body: JSON.stringify(wire) }),
-        ),
+      raw.initialPaymentKobo = 100;
+      const other = structuredClone(raw);
+      other.id = crypto.randomUUID();
+      other.operationId = crypto.randomUUID();
+      other.items[0].id = crypto.randomUUID();
+      await Promise.all([saveSale(raw, o.local), saveSale(other, phone.local)]);
+      await Promise.all([
+        runSync({ database: o.local, request: o.request, force: true }),
+        runSync({ database: phone.local, request: phone.request, force: true }),
+      ]);
+      expect(await runSync({ database: o.local, request: o.request, force: true })).toBe('done');
+      expect(await runSync({ database: phone.local, request: phone.request, force: true })).toBe(
+        'done',
       );
-      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
-      const failure = results.find((result) => result.status === 'rejected');
-      expect(failure).toMatchObject({ status: 'rejected', reason: { status: 422 } });
       const remote = await readSnapshot(db, o.account.storeId);
-      expect(remote.sales).toHaveLength(1);
-      expect(remote.items).toHaveLength(1);
-      expect(remote.units[0].quantityOnHand).toBe('0');
-      expect(remote.movements).toHaveLength(2);
+      expect(remote.sales).toHaveLength(2);
+      expect(remote.items).toHaveLength(2);
+      expect(remote.payments).toHaveLength(2);
+      expect(remote.payments.map((payment) => payment.amountKobo)).toEqual([100, 100]);
+      expect(remote.units[0].quantityOnHand).toBe('-1');
+      expect(remote.movements).toHaveLength(3);
+      for (const local of [o.local, phone.local])
+        expect(snapshotJson(await localSnapshot(local, o.account.storeId))).toBe(
+          snapshotJson(remote),
+        );
+    }, 30_000);
+    it('keeps a conflicting offline repayment for review without overpaying the shared sale', async () => {
+      const o = await owner();
+      const sale = await saveSale(saleInput(), o.local);
+      expect(await runSync({ database: o.local, request: o.request, force: true })).toBe('done');
+      const phone = await anotherPhone(o);
+      expect(await runSync({ database: phone.local, request: phone.request, force: true })).toBe(
+        'done',
+      );
+      await Promise.all([
+        recordPayment(sale.id, 400000, crypto.randomUUID(), o.local),
+        recordPayment(sale.id, 400000, crypto.randomUUID(), phone.local),
+      ]);
+      await Promise.all([
+        runSync({ database: o.local, request: o.request, force: true }),
+        runSync({ database: phone.local, request: phone.request, force: true }),
+      ]);
+      const remote = await readSnapshot(db, o.account.storeId);
+      expect(remote.payments).toHaveLength(2);
+      expect(outstandingFor(remote.sales[0], remote.payments)).toBe(250000);
+      const failures = (
+        await Promise.all(
+          [o.local, phone.local].map(async (local) => ({
+            local,
+            failed: await local.outbox.where('status').equals('failed').toArray(),
+          })),
+        )
+      ).filter(({ failed }) => failed.length > 0);
+      expect(failures).toHaveLength(1);
+      const { local, failed } = failures[0];
+      expect(failed[0]).toMatchObject({
+        kind: 'payment.create',
+        error: 'Payment exceeds the outstanding balance.',
+        payload: { amountKobo: 400000 },
+      });
+      expect(await local.payments.count()).toBe(2);
+      expect((await local.metadata.get('account'))?.value).toMatchObject({ writer: true });
+      expect((await local.metadata.get('sync'))?.value).toMatchObject({ status: 'failed' });
     }, 30_000);
     it('retains a pending change after a mismatched acknowledgment and retries it after reopening IndexedDB', async () => {
       const o = await owner();

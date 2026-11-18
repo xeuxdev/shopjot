@@ -237,18 +237,6 @@ export function SaleEntry({ notify }: { notify: (message: string) => void }) {
         Opening your sale book…{error}
       </p>
     );
-  if (data.account && !data.account.writer)
-    return (
-      <section className="panel form-section">
-        <h1>This phone is read-only</h1>
-        <p className="heading-description">
-          Open Settings to review which phone can create new records.
-        </p>
-        <Link className="back-link" to="/settings">
-          Settings & data
-        </Link>
-      </section>
-    );
   return (
     <div className="sale-page">
       <Link to="/" className="back-link">

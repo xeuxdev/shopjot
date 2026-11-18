@@ -9,10 +9,6 @@ export async function assertCanWrite(database: LedgerDB) {
     throw new Error('Sign in to unlock this ledger. Your local records have been kept.');
   if (account && !account.restoreReady)
     throw new Error('Wait for this phone’s restore to finish before recording changes.');
-  if (account && !account.writer)
-    throw new Error(
-      'This phone is in read-only mode. Review the device switch in Settings before recording changes.',
-    );
   const store = (await database.metadata.get('store'))?.value as StoreProfile | undefined;
   const identity = (await database.metadata.get('identity'))?.value as DeviceIdentity;
   if (!store || store.id !== identity.storeId)

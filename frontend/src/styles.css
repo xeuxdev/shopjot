@@ -16,15 +16,6 @@
   margin: 18px 0;
   overflow-wrap: anywhere;
 }
-.device-switch {
-  margin-top: 20px;
-  padding-top: 18px;
-  border-top: 1px solid #e6eae6;
-}
-.device-switch .button {
-  margin-top: 12px;
-}
-
 @theme {
   --color-forest: #174f3b;
   --color-paper: #f6f8f6;

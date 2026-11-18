@@ -319,7 +319,7 @@ async function runWithLease(options: SyncOptions, exclusive: boolean): Promise<S
         await database.metadata.put({
           key: 'sync',
           value: {
-            status: account!.writer ? 'backed_up' : 'device_blocked',
+            status: 'backed_up',
             cursor,
             lastBackupAt: new Date().toISOString(),
             failureCount: 0,
@@ -339,12 +339,6 @@ async function runWithLease(options: SyncOptions, exclusive: boolean): Promise<S
           : 'Backup could not finish. Your local records have been kept.';
     if (error instanceof HttpError && error.status === 401) {
       await state({ status: 'auth_required', error: message });
-      return 'blocked';
-    }
-    if (error instanceof HttpError && error.code === 'DEVICE_REPLACED') {
-      const account = (await database.metadata.get('account'))?.value as LocalAccount;
-      await database.metadata.put({ key: 'account', value: { ...account, writer: false } });
-      await state({ status: 'device_blocked', error: message });
       return 'blocked';
     }
     if (

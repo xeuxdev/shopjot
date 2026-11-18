@@ -175,7 +175,7 @@ export function StoreSetup({ installAction }: { installAction: ReactNode }) {
           <p className="quiet-note">
             {mode === 'create'
               ? 'Records stay on this browser until you connect an account for backup. Keep exports as an extra copy.'
-              : 'Restored stores start read-only. You can make this the primary phone after checking your records.'}
+              : 'Your store downloads before you can record new changes. Every phone signed in to this store can record sales.'}
           </p>
         </section>
       </div>
