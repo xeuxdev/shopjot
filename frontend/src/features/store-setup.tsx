@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowRight, BookOpen, Cloud, ShieldCheck, WifiOff } from 'lucide-react';
 import { Button, ErrorMessage } from '../components/ui';
 import { ShopjotMark } from '../components/brand';
@@ -6,7 +6,7 @@ import { createLocalStore } from '../db/store';
 import { userMessage } from '../lib/errors';
 import { connectAccount } from './sync/account';
 
-export function StoreSetup() {
+export function StoreSetup({ installAction }: { installAction: ReactNode }) {
   const [mode, setMode] = useState<'create' | 'login'>('create');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -34,12 +34,15 @@ export function StoreSetup() {
   }
   return (
     <main className={`store-setup${mode === 'login' ? ' store-login' : ''}`} id="main">
-      <div className="setup-brand brand">
-        <ShopjotMark />
-        <span>
-          Shopjot<small>Your everyday store ledger</small>
-        </span>
-      </div>
+      <header className="setup-header">
+        <div className="setup-brand brand">
+          <ShopjotMark />
+          <span>
+            Shopjot<small>Your everyday store ledger</small>
+          </span>
+        </div>
+        {installAction}
+      </header>
       <div className="setup-layout">
         <section className="setup-intro" aria-labelledby="setup-title">
           <span className="setup-eyebrow">

@@ -31,8 +31,15 @@ export default defineConfig(({ command, mode }) => {
         srcDir: 'src',
         filename: 'sw.ts',
         registerType: 'prompt',
-        includeAssets: ['icon.svg', 'icon-192.png', 'icon-512.png'],
+        includeAssets: [
+          'icon.svg',
+          'icon-192.png',
+          'icon-512.png',
+          'icon-maskable-512.png',
+          'apple-touch-icon.png',
+        ],
         manifest: {
+          id: '/',
           name: 'Shopjot — Store Ledger',
           short_name: 'Shopjot',
           description: 'Your everyday store ledger, even offline.',
@@ -43,7 +50,13 @@ export default defineConfig(({ command, mode }) => {
           scope: '/',
           icons: [
             { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-            { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+            { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+            {
+              src: '/icon-maskable-512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'maskable',
+            },
           ],
         },
         injectManifest: {

@@ -95,6 +95,18 @@ The API schema, operation IDs, retry logic, and browser database name are unchan
 
 Reliable sync retains pending changes until matching acknowledgment, verifies complete ledger counts/checksum, and retries without duplicating money or stock. Browser execution after closing remains best-effort; the queue resumes whenever the app or service worker can run. Records lost from a phone before server acknowledgment cannot be recovered from the server.
 
+## Install on Android and iOS
+
+The frontend is an installable PWA. Serve it over HTTPS on the existing frontend domain; no app store upload or backend change is needed. The **Install Shopjot** button is on the setup screen, and **Install** is in the app header after setup. It is hidden when running as an installed app.
+
+- **Android:** Tap **Install** to open the browser's install prompt when available. Otherwise, use Chrome's menu → **Install app** or **Add to Home screen**, as shown in the button's guide.
+- **iPhone/iPad:** The button opens instructions. In Safari, choose **Share → Add to Home Screen**, keep **Open as Web App** enabled if shown, then tap **Add**. Safari may put Share inside its More menu. iOS does not provide a JavaScript install prompt.
+- Back up an existing ledger before installing. Some browsers give the installed app separate storage; if it opens the setup screen, use **Sign in to your store** to restore backed-up records.
+
+After deploying, verify both flows on actual Android and iOS devices, check the Shopjot home-screen icon, launch from that icon, and reload offline after the first online launch. The normal Vite development server does not generate the production service worker; test the production build using `npm run preview` on localhost or an HTTPS deployment.
+
+Install behavior follows the [browser installation flow](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/How_to/Trigger_install_prompt) and [Apple's home-screen instructions](https://support.apple.com/guide/iphone/open-as-web-app-iphea86e5236/ios).
+
 ## Local commands
 
 Backend:

@@ -18,6 +18,7 @@ import { useRegisterSW } from 'virtual:pwa-register/react';
 import { Button } from '../components/ui';
 import { ShopjotMark } from '../components/brand';
 import { StoreSetup } from '../features/store-setup';
+import { InstallAppButton, useAppInstall } from '../features/install-app';
 import { useLedger } from '../lib/use-ledger';
 import { startSyncScheduler } from '../features/sync/scheduler';
 import { BackupSettings, backupLabel } from '../features/sync/backup-settings';
@@ -41,6 +42,7 @@ const destinations = [
 export function App() {
   const data = useLedger();
   const location = useLocation();
+  const install = useAppInstall();
   const [online, setOnline] = useState(navigator.onLine);
   const [toast, setToast] = useState('');
   const [now, setNow] = useState(new Date());
@@ -77,7 +79,7 @@ export function App() {
   }, []);
   useEffect(() => {
     window.scrollTo(0, 0);
-  }, [location.pathname]);
+  }, [location.pathname, data?.store?.id]);
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(''), 5500);
@@ -86,7 +88,12 @@ export function App() {
   useEffect(() => {
     document.title = data?.store ? `${data.store.name} · Shopjot` : 'Shopjot · Your store ledger';
   }, [data?.store?.name]);
-  if (data && !data.store) return <StoreSetup />;
+  if (data && !data.store)
+    return (
+      <StoreSetup
+        installAction={<InstallAppButton install={install}>Install Shopjot</InstallAppButton>}
+      />
+    );
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main">
@@ -160,6 +167,7 @@ export function App() {
             </strong>
           </div>
           <div className="topbar-right">
+            <InstallAppButton install={install} />
             <span className="today-date">
               {new Intl.DateTimeFormat('en-NG', {
                 timeZone: 'Africa/Lagos',
