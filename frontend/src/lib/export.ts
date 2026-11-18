@@ -1,5 +1,5 @@
 import { db, getIdentity } from '../db/database';
-import { outstandingFor, paymentStatus } from '../domain/index';
+import { outstandingFor, paymentStatus, sumKobo } from '../domain/index';
 import type { StoreProfile } from '../db/store';
 function download(name: string, data: string, type: string) {
   const url = URL.createObjectURL(new Blob([data], { type }));
@@ -64,9 +64,11 @@ export async function exportData(kind: 'sales' | 'customers' | 'json') {
             c.id,
             c.name,
             c.phone,
-            data.sales
-              .filter((s) => s.customerId === c.id)
-              .reduce((n, s) => n + outstandingFor(s, data.payments), 0),
+            sumKobo(
+              data.sales
+                .filter((s) => s.customerId === c.id)
+                .map((s) => outstandingFor(s, data.payments)),
+            ),
           ]),
         ];
   download(

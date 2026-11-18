@@ -1,7 +1,12 @@
 import 'fake-indexeddb/auto';
 import { afterAll, describe, expect, it } from 'vitest';
 import { eq, inArray } from 'drizzle-orm';
-import { canonicalJson, snapshotJson, type SaleInput } from '../frontend/src/domain';
+import {
+  canonicalJson,
+  outstandingFor,
+  snapshotJson,
+  type SaleInput,
+} from '../frontend/src/domain';
 import { createApp } from '../backend/src/app';
 import { makeDatabase } from '../backend/src/db/client';
 import * as tables from '../backend/src/db/schema';
@@ -297,6 +302,113 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       expect(state.status).toBe('failed');
       expect(state.error).toContain('verification');
       expect(await o.local.customers.count()).toBe(2);
+    }, 30_000);
+    it('preserves per-line rounding, fractional stock, and one-kobo repayments through PostgreSQL', async () => {
+      const o = await owner();
+      await registerStock('Rice', 'mudu', '1.001', 1, crypto.randomUUID(), o.local);
+      const unit = (await o.local.productUnits.toArray())[0];
+      const raw = saleInput(unit.id);
+      raw.initialPaymentKobo = 1;
+      raw.items = raw.items.map((item) => ({
+        ...item,
+        quantity: '0.5',
+        quantityLabel: 'mudu',
+        unitPriceKobo: 1,
+        productUnitId: unit.id,
+      }));
+      const sale = await saveSale(raw, o.local);
+      expect(sale.totalKobo).toBe(2);
+      expect(await runSync({ database: o.local, request: o.request, force: true })).toBe('done');
+      const op = crypto.randomUUID();
+      await recordPayment(sale.id, 1, op, o.local);
+      await recordPayment(sale.id, 1, op, o.local);
+      expect(await runSync({ database: o.local, request: o.request, force: true })).toBe('done');
+      const remote = await readSnapshot(db, o.account.storeId);
+      expect(remote.items.map((item) => item.lineTotalKobo)).toEqual([1, 1]);
+      expect(remote.units[0].quantityOnHand).toBe('0.001');
+      expect(remote.movements.map((movement) => movement.quantityDelta).sort()).toEqual([
+        '-0.5',
+        '-0.5',
+        '1.001',
+      ]);
+      expect(remote.payments).toHaveLength(2);
+      expect(outstandingFor(remote.sales[0], remote.payments)).toBe(0);
+      expect(snapshotJson(await localSnapshot(o.local, o.account.storeId))).toBe(
+        snapshotJson(remote),
+      );
+    }, 30_000);
+    it('round-trips the maximum supported kobo amount without losing a digit', async () => {
+      const o = await owner();
+      const raw = saleInput();
+      raw.items = [{ ...raw.items[0], quantity: '1', unitPriceKobo: Number.MAX_SAFE_INTEGER }];
+      raw.initialPaymentKobo = Number.MAX_SAFE_INTEGER;
+      await saveSale(raw, o.local);
+      expect(await runSync({ database: o.local, request: o.request, force: true })).toBe('done');
+      const remote = await readSnapshot(db, o.account.storeId);
+      expect(remote.sales[0].totalKobo).toBe(Number.MAX_SAFE_INTEGER);
+      expect(remote.items[0].lineTotalKobo).toBe(Number.MAX_SAFE_INTEGER);
+      expect(remote.payments[0].amountKobo).toBe(Number.MAX_SAFE_INTEGER);
+      expect(outstandingFor(remote.sales[0], remote.payments)).toBe(0);
+    }, 30_000);
+    it('rejects overflowing arithmetic as invalid input and rolls back the entire server operation', async () => {
+      const o = await owner();
+      await saveSale(saleInput(), o.local);
+      const wire = await toWire((await o.local.outbox.toArray())[0], o.local);
+      if (wire.kind !== 'sale.create') throw new Error('Expected sale');
+      for (const quantity of ['1', '2']) {
+        const bad = structuredClone(wire);
+        bad.payload.items = bad.payload.items.map((item) => ({
+          ...item,
+          quantity,
+          unitPriceKobo: Number.MAX_SAFE_INTEGER,
+          lineTotalKobo: Number.MAX_SAFE_INTEGER,
+        }));
+        bad.payload.sale.totalKobo = Number.MAX_SAFE_INTEGER;
+        await expect(
+          o.request('/sync/push', { method: 'POST', body: JSON.stringify(bad) }),
+        ).rejects.toMatchObject({ status: 422, code: 'INVALID_AMOUNT' });
+        const remote = await readSnapshot(db, o.account.storeId);
+        expect(remote.sales).toHaveLength(0);
+        expect(remote.customers).toHaveLength(0);
+        expect(remote.items).toHaveLength(0);
+        expect(remote.payments).toHaveLength(0);
+      }
+      // The rejected ID remains usable for the original valid request.
+      await o.request('/sync/push', { method: 'POST', body: JSON.stringify(wire) });
+      expect((await readSnapshot(db, o.account.storeId)).sales).toHaveLength(1);
+    }, 30_000);
+    it('serializes competing sales so only one can consume the last stock', async () => {
+      const o = await owner();
+      await registerStock('Rice', 'mudu', '1', 100, crypto.randomUUID(), o.local);
+      expect(await runSync({ database: o.local, request: o.request, force: true })).toBe('done');
+      const unit = (await o.local.productUnits.toArray())[0];
+      const raw = saleInput(unit.id);
+      raw.items = [{ ...raw.items[0], quantity: '1', unitPriceKobo: 100 }];
+      raw.initialPaymentKobo = 0;
+      await saveSale(raw, o.local);
+      const queued = (await o.local.outbox.toArray()).find((op) => op.kind === 'sale.create')!;
+      const first = await toWire(queued, o.local);
+      if (first.kind !== 'sale.create') throw new Error('Expected sale');
+      const second = structuredClone(first);
+      second.operationId = crypto.randomUUID();
+      second.payload.sale.id = crypto.randomUUID();
+      second.payload.items[0].id = crypto.randomUUID();
+      second.payload.items[0].saleId = second.payload.sale.id;
+      second.payload.movements[0].id = crypto.randomUUID();
+      second.payload.movements[0].saleItemId = second.payload.items[0].id;
+      const results = await Promise.allSettled(
+        [first, second].map((wire) =>
+          o.request('/sync/push', { method: 'POST', body: JSON.stringify(wire) }),
+        ),
+      );
+      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+      const failure = results.find((result) => result.status === 'rejected');
+      expect(failure).toMatchObject({ status: 'rejected', reason: { status: 422 } });
+      const remote = await readSnapshot(db, o.account.storeId);
+      expect(remote.sales).toHaveLength(1);
+      expect(remote.items).toHaveLength(1);
+      expect(remote.units[0].quantityOnHand).toBe('0');
+      expect(remote.movements).toHaveLength(2);
     }, 30_000);
     it('retains a pending change after a mismatched acknowledgment and retries it after reopening IndexedDB', async () => {
       const o = await owner();

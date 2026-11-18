@@ -10,9 +10,66 @@ import {
   nameSchema,
   koboSchema,
   type SaleInput,
+  type SyncOperation,
 } from '../domain/index';
-import { db, getIdentity, type LedgerDB } from './database';
+import { db, getIdentity, type DeviceIdentity, type LedgerDB } from './database';
 import { assertCanWrite, enqueue } from './queue';
+
+function replayConflict() {
+  return new Error(
+    'This entry was already saved with different contents. Open the saved record to check it, then start a new entry if needed.',
+  );
+}
+
+type OperationPayloads = {
+  [K in SyncOperation['kind']]: Extract<SyncOperation, { kind: K }>['payload'];
+};
+
+async function isReplay<K extends SyncOperation['kind']>(
+  database: LedgerDB,
+  identity: DeviceIdentity,
+  operationId: string,
+  kind: K,
+  matches: (payload: OperationPayloads[K]) => boolean,
+) {
+  const previous = await database.outbox.get(operationId);
+  if (!previous) return false;
+  if (
+    previous.storeId !== identity.storeId ||
+    previous.deviceId !== identity.deviceId ||
+    previous.kind !== kind ||
+    !matches(previous.payload as OperationPayloads[K])
+  )
+    throw replayConflict();
+  return true;
+}
+
+function sameSaleRequest(
+  saved: Extract<SyncOperation, { kind: 'sale.create' }>['payload'],
+  input: SaleInput,
+) {
+  // The form stamps each save attempt with a new time. A matching retry returns
+  // the original receipt and time; its customer, goods and money must still match.
+  return (
+    saved.sale.id === input.id &&
+    (input.customerId
+      ? saved.customer.id === input.customerId
+      : saved.customer.name === input.customerName) &&
+    (saved.payment?.amountKobo ?? 0) === input.initialPaymentKobo &&
+    saved.items.length === input.items.length &&
+    saved.items.every((item, position) => {
+      const incoming = input.items[position];
+      return (
+        item.id === incoming.id &&
+        item.name === incoming.name &&
+        decimalToMilli(item.quantity) === decimalToMilli(incoming.quantity) &&
+        item.quantityLabel === incoming.quantityLabel &&
+        item.unitPriceKobo === incoming.unitPriceKobo &&
+        item.productUnitId === incoming.productUnitId
+      );
+    })
+  );
+}
 
 export async function saveSale(raw: SaleInput, database: LedgerDB = db) {
   const input = saleInputSchema.parse(raw);
@@ -32,8 +89,22 @@ export async function saveSale(raw: SaleInput, database: LedgerDB = db) {
     ],
     async () => {
       await assertCanWrite(database);
+      const replay = await isReplay(
+        database,
+        identity,
+        input.operationId,
+        'sale.create',
+        (payload) => sameSaleRequest(payload, input),
+      );
       const existingSale = await database.sales.get(input.id);
-      if (existingSale) return existingSale;
+      if (existingSale) {
+        if (!replay || existingSale.storeId !== storeId) throw replayConflict();
+        return existingSale;
+      }
+      if (replay)
+        throw new Error(
+          'The saved sale could not be found. Keep this ledger and review its records.',
+        );
       const createdAt = new Date().toISOString();
       let customer = input.customerId ? await database.customers.get(input.customerId) : undefined;
       if (input.customerId && (!customer || customer.storeId !== storeId))
@@ -140,7 +211,16 @@ export async function recordPayment(
     [database.sales, database.payments, database.outbox, database.metadata],
     async () => {
       await assertCanWrite(database);
-      if (await database.outbox.get(operationId)) return;
+      if (
+        await isReplay(
+          database,
+          identity,
+          operationId,
+          'payment.create',
+          (payment) => payment.saleId === saleId && payment.amountKobo === amountKobo,
+        )
+      )
+        return;
       const sale = await database.sales.get(saleId);
       if (!sale || sale.storeId !== identity.storeId || sale.status !== 'active')
         throw new Error('This sale is unavailable.');
@@ -173,6 +253,7 @@ export async function registerStock(
   name = nameSchema.parse(name);
   label = nameSchema.parse(label);
   koboSchema.parse(priceKobo);
+  z.uuid().parse(operationId);
   if (!/^\d{1,9}(\.\d{1,3})?$/.test(quantity))
     throw new Error('Enter a stock count of zero or more, with up to 3 decimal places.');
   const identity = await getIdentity(database);
@@ -187,7 +268,20 @@ export async function registerStock(
     ],
     async () => {
       await assertCanWrite(database);
-      if (await database.outbox.get(operationId)) return;
+      if (
+        await isReplay(
+          database,
+          identity,
+          operationId,
+          'stock.register',
+          ({ product, unit }) =>
+            product.normalizedName === normalize(name) &&
+            unit.label === label &&
+            unit.suggestedUnitPriceKobo === priceKobo &&
+            decimalToMilli(unit.quantityOnHand) === decimalToMilli(quantity),
+        )
+      )
+        return;
       const now = new Date().toISOString();
       let product = await database.products
         .where('normalizedName')
@@ -246,6 +340,7 @@ export async function adjustStock(
   operationId: string,
   database: LedgerDB = db,
 ) {
+  z.uuid().parse(operationId);
   if (!/^\d{1,9}(\.\d{1,3})?$/.test(count))
     throw new Error('Enter a count of zero or more, with up to 3 decimal places.');
   const identity = await getIdentity(database);
@@ -254,7 +349,17 @@ export async function adjustStock(
     [database.productUnits, database.stockMovements, database.outbox, database.metadata],
     async () => {
       await assertCanWrite(database);
-      if (await database.outbox.get(operationId)) return;
+      if (
+        await isReplay(
+          database,
+          identity,
+          operationId,
+          'stock.adjust',
+          (payload) =>
+            payload.unitId === unitId && decimalToMilli(payload.count) === decimalToMilli(count),
+        )
+      )
+        return;
       const unit = await database.productUnits.get(unitId);
       if (!unit || unit.storeId !== identity.storeId) throw new Error('Stock item not found.');
       const now = new Date().toISOString();

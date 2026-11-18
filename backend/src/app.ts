@@ -6,6 +6,7 @@ import { and, eq } from 'drizzle-orm';
 import {
   z,
   ZodError,
+  MoneyRangeError,
   accountResponseSchema,
   credentialsSchema,
   registrationSchema,
@@ -69,6 +70,8 @@ export function createApp(options: Options = {}) {
       await owned.pool.end();
     });
   app.setErrorHandler((error, request, reply) => {
+    if (error instanceof MoneyRangeError)
+      return reply.code(422).send({ code: 'INVALID_AMOUNT', message: error.message });
     if (error instanceof ZodError)
       return reply
         .code(422)

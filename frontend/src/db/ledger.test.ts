@@ -70,6 +70,82 @@ describe('atomic local ledger', () => {
       outstandingFor((await database.sales.get(raw.id))!, await database.payments.toArray()),
     ).toBe(450000);
   });
+  it('rejects changed sale contents under an already saved draft ID', async () => {
+    const raw = input();
+    const saved = await saveSale(raw, database);
+    const changed = structuredClone(raw);
+    changed.items[0].unitPriceKobo++;
+    await expect(saveSale(changed, database)).rejects.toThrow('already');
+    await expect(saveSale({ ...raw, initialPaymentKobo: 1 }, database)).rejects.toThrow('already');
+    await expect(saveSale({ ...raw, customerName: 'Another customer' }, database)).rejects.toThrow(
+      'already',
+    );
+    expect(await database.sales.get(saved.id)).toEqual(saved);
+    expect(await database.payments.count()).toBe(1);
+    expect(await database.outbox.count()).toBe(1);
+    // A retry from the form gets a new attempt time, but must return the original receipt.
+    expect(await saveSale({ ...raw, occurredAt: '2026-11-15T10:00:00.000Z' }, database)).toEqual(
+      saved,
+    );
+  });
+  it('rejects reusing a payment operation for another amount or sale', async () => {
+    const first = await saveSale(input(), database);
+    const second = await saveSale(input(), database);
+    const operationId = id();
+    await recordPayment(first.id, 200000, operationId, database);
+    await expect(recordPayment(first.id, 100000, operationId, database)).rejects.toThrow('already');
+    await expect(recordPayment(second.id, 200000, operationId, database)).rejects.toThrow(
+      'already',
+    );
+    expect(await database.payments.count()).toBe(3);
+    expect(outstandingFor(first, await database.payments.toArray())).toBe(450000);
+    expect(outstandingFor(second, await database.payments.toArray())).toBe(650000);
+  });
+  it('serializes distinct concurrent repayments so they cannot overpay', async () => {
+    const sale = await saveSale(input(), database);
+    const results = await Promise.allSettled([
+      recordPayment(sale.id, 400000, id(), database),
+      recordPayment(sale.id, 400000, id(), database),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(await database.payments.count()).toBe(2);
+    expect(outstandingFor(sale, await database.payments.toArray())).toBe(250000);
+  });
+  it('rejects invalid money values and overflowing totals without changing any records', async () => {
+    for (const amount of [-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+      await expect(saveSale(input({ initialPaymentKobo: amount }), database)).rejects.toThrow();
+      const raw = input();
+      raw.items[0].unitPriceKobo = amount;
+      await expect(saveSale(raw, database)).rejects.toThrow();
+    }
+    const raw = input({ initialPaymentKobo: 0 });
+    raw.items = raw.items.map((item) => ({
+      ...item,
+      quantity: '1',
+      unitPriceKobo: Number.MAX_SAFE_INTEGER,
+    }));
+    await expect(saveSale(raw, database)).rejects.toThrow('too large');
+    expect(await database.sales.count()).toBe(0);
+    expect(await database.saleItems.count()).toBe(0);
+    expect(await database.payments.count()).toBe(0);
+    expect(await database.customers.count()).toBe(0);
+    expect(await database.outbox.count()).toBe(0);
+  });
+  it('stores per-line rounding and one-kobo repayments exactly across reload', async () => {
+    const raw = input({ initialPaymentKobo: 1 });
+    raw.items = raw.items.map((item) => ({ ...item, quantity: '0.5', unitPriceKobo: 1 }));
+    const sale = await saveSale(raw, database);
+    expect(sale.totalKobo).toBe(2);
+    expect((await database.saleItems.toArray()).map((item) => item.lineTotalKobo)).toEqual([1, 1]);
+    await recordPayment(sale.id, 1, id(), database);
+    database.close();
+    await database.open();
+    expect(
+      outstandingFor((await database.sales.get(sale.id))!, await database.payments.toArray()),
+    ).toBe(0);
+    await expect(recordPayment(sale.id, 1, id(), database)).rejects.toThrow('exceed');
+  });
   it('rejects overpayment and rolls back failed writes without partial records', async () => {
     await expect(saveSale(input({ initialPaymentKobo: 2000000 }), database)).rejects.toThrow();
     expect(await database.sales.count()).toBe(0);
@@ -138,6 +214,21 @@ describe('explicit inventory association', () => {
     const movements = await database.stockMovements.toArray();
     expect(movements.filter((m) => m.reason === 'manual_adjustment')).toHaveLength(1);
     expect((await database.saleItems.get(raw.items[0].id))?.unitPriceKobo).toBe(350000);
+  });
+  it('rejects changed stock operations instead of silently losing a new count', async () => {
+    const operationId = id();
+    await registerStock('Rice', 'mudu', '15', 350000, operationId, database);
+    await registerStock('Rice', 'mudu', '15.000', 350000, operationId, database);
+    await expect(
+      registerStock('Rice', 'mudu', '16', 350000, operationId, database),
+    ).rejects.toThrow('already');
+    const unit = (await database.productUnits.toArray())[0];
+    await expect(adjustStock(unit.id, '10', operationId, database)).rejects.toThrow('already');
+    const adjustmentId = id();
+    await adjustStock(unit.id, '12.125', adjustmentId, database);
+    await expect(adjustStock(unit.id, '13', adjustmentId, database)).rejects.toThrow('already');
+    expect((await database.productUnits.get(unit.id))?.quantityOnHand).toBe('12.125');
+    expect(await database.stockMovements.count()).toBe(2);
   });
   it('rolls back all tables when a later row has an invalid stock association', async () => {
     const unit = await stock();

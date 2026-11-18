@@ -138,3 +138,82 @@ test('desktop overview renders without browser errors or overflow', async ({ pag
   );
   await page.screenshot({ path: 'test-results/home-desktop.png', fullPage: true });
 });
+
+test('invalid amounts never appear as zero or silently reduce the checkout total', async ({
+  page,
+}) => {
+  await createStore(page);
+  await page.goto('/sales/new');
+  await page.getByLabel('Customer name').fill('Cash customer');
+  await row(page, 0, { name: 'Rice', quantity: '1', label: 'bag', price: '100' });
+  await expect(page.locator('.checkout-total strong')).toHaveText('₦100');
+  await page.getByRole('button', { name: 'Add another item' }).click();
+  await row(page, 1, { name: 'Oil', quantity: '1', label: 'bottle', price: '2.999' });
+  await expect(page.locator('.item-bottom strong').nth(1)).toHaveText('—');
+  await expect(page.locator('.checkout-total strong')).toHaveText('—');
+  await page.getByRole('button', { name: 'Save sale', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('valid quantity and price');
+  await page.locator('.sale-item').nth(1).getByLabel('Price per unit (₦)').fill('2.99');
+  await expect(page.locator('.checkout-total strong')).toHaveText('₦102.99');
+  await page.getByRole('radio', { name: 'Part payment' }).check();
+  await page.getByLabel('Amount received (₦)').fill('103');
+  await expect(page.locator('.summary-row.owed strong')).toHaveText('—');
+  await page.getByRole('button', { name: 'Save sale', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('cannot exceed');
+  await page.getByLabel('Amount received (₦)').fill('0.01');
+  await expect(page.locator('.summary-row.owed strong')).toHaveText('₦102.98');
+  await page.getByRole('button', { name: 'Save sale', exact: true }).click();
+  await expect(page.locator('.receipt-total strong')).toHaveText('₦102.99');
+  await expect(page.locator('.balance-due strong')).toHaveText('₦102.98');
+});
+
+test('two tabs cannot silently save different contents under the same sale draft', async ({
+  page,
+  context,
+}) => {
+  await createStore(page);
+  await page.goto('/sales/new');
+  await page.getByLabel('Customer name').fill('First customer');
+  await row(page, 0, { name: 'Rice', quantity: '1', label: 'bag', price: '100' });
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const database = await new Promise<IDBDatabase>((resolve) => {
+          const request = indexedDB.open('doris-foods-ledger');
+          request.onsuccess = () => resolve(request.result);
+        });
+        try {
+          return await new Promise<string | undefined>((resolve) => {
+            const request = database
+              .transaction('metadata')
+              .objectStore('metadata')
+              .get('sale-draft');
+            request.onsuccess = () => resolve(request.result?.value.rows[0].price);
+          });
+        } finally {
+          database.close();
+        }
+      }),
+    )
+    .toBe('100');
+  const other = await context.newPage();
+  try {
+    await other.goto('/sales/new');
+    await expect(other.getByLabel('Customer name')).toHaveValue('First customer');
+    await other.getByLabel('Price per unit (₦)').fill('200');
+    await page.getByRole('button', { name: 'Save sale', exact: true }).click();
+    await expect(page.locator('.receipt-total strong')).toHaveText('₦100');
+    await other.getByLabel('Customer name').click();
+    await other
+      .locator('.suggestions')
+      .getByRole('button', { name: /First customer/ })
+      .click();
+    await other.getByRole('button', { name: 'Save sale', exact: true }).click();
+    await expect(other.getByRole('alert')).toContainText('already saved with different contents');
+    await page.reload();
+    await expect(page.locator('.receipt-total strong')).toHaveText('₦100');
+    await expect(page.locator('.payment-event')).toHaveCount(1);
+  } finally {
+    await other.close();
+  }
+});

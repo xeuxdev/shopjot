@@ -62,7 +62,7 @@ function subtotal(row: Row) {
   try {
     return lineTotal(row.quantity, parseNaira(row.price));
   } catch {
-    return 0;
+    return null;
   }
 }
 
@@ -119,20 +119,23 @@ export function SaleEntry({ notify }: { notify: (message: string) => void }) {
   const rowUpdate = (id: string, value: Partial<Row>) =>
     setDraft((d) => ({ ...d, rows: d.rows.map((r) => (r.id === id ? { ...r, ...value } : r)) }));
   let total = 0;
+  let totalValid = false;
   let totalError = '';
   try {
-    total = sumKobo(draft.rows.map(subtotal));
+    const subtotals = draft.rows.map(subtotal);
+    if (subtotals.every((value) => value !== null)) {
+      total = sumKobo(subtotals);
+      totalValid = true;
+    }
   } catch {
     totalError = 'The sale total is too large. Reduce the quantities or prices.';
   }
   let received = 0;
+  let receivedValid = false;
   try {
     received =
-      draft.payment === 'full'
-        ? total
-        : draft.payment === 'partial' && draft.amount
-          ? parseNaira(draft.amount)
-          : 0;
+      draft.payment === 'full' ? total : draft.payment === 'partial' ? parseNaira(draft.amount) : 0;
+    receivedValid = draft.payment !== 'full' || totalValid;
   } catch {
     /* Validated on save. */
   }
@@ -171,8 +174,8 @@ export function SaleEntry({ notify }: { notify: (message: string) => void }) {
     event.preventDefault();
     if (busy.current || !loaded || !data) return;
     setError('');
-    if (totalError) {
-      setError(totalError);
+    if (!totalValid) {
+      setError(totalError || 'Enter a valid quantity and price for every item before saving.');
       return;
     }
     if (!draft.customerId && similar.length && !confirmNew) {
@@ -329,6 +332,7 @@ export function SaleEntry({ notify }: { notify: (message: string) => void }) {
             </div>
             <div className="item-rows">
               {draft.rows.map((row, index) => {
+                const rowTotal = subtotal(row);
                 const matches = data.units
                   .filter((u) =>
                     data.products
@@ -464,7 +468,7 @@ export function SaleEntry({ notify }: { notify: (message: string) => void }) {
                           'Not tracked in inventory'
                         )}
                       </span>
-                      <strong>{money(subtotal(row))}</strong>
+                      <strong>{rowTotal === null ? '—' : money(rowTotal)}</strong>
                     </div>
                   </div>
                 );
@@ -490,7 +494,7 @@ export function SaleEntry({ notify }: { notify: (message: string) => void }) {
             </div>
             <div className="checkout-total">
               <span>Sale total</span>
-              <strong>{money(total)}</strong>
+              <strong>{totalValid ? money(total) : '—'}</strong>
             </div>
             <div className="payment-options" role="radiogroup" aria-label="Payment type">
               {(
@@ -532,11 +536,13 @@ export function SaleEntry({ notify }: { notify: (message: string) => void }) {
             )}
             <div className="summary-row">
               <span>Amount received</span>
-              <strong>{money(received)}</strong>
+              <strong>{receivedValid ? money(received) : '—'}</strong>
             </div>
             <div className="summary-row owed">
               <span>Amount still owed</span>
-              <strong>{money(Math.max(0, total - received))}</strong>
+              <strong>
+                {totalValid && receivedValid && received <= total ? money(total - received) : '—'}
+              </strong>
             </div>
             {stockWarnings.length > 0 && (
               <div className="stock-warning">

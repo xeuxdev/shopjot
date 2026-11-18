@@ -76,6 +76,16 @@ The `tests/` folder is only an integration-test harness. Neither deployment impo
 
 Money calculations and versioned sync contracts are committed under each application's `src/domain/`, so builds need no shared package or registry. `node scripts/check-domain.mjs` checks that these files remain identical. Update both copies together when changing the financial/protocol rules, then run the cross-application sync tests.
 
+## Money rules
+
+- Amounts are nonnegative integer kobo. Inputs accept up to two decimal places for naira and three for quantities; extra precision is rejected.
+- Each item is calculated with integer arithmetic and rounded half up to the nearest kobo. The sale total is the sum of those rounded lines. For example, two separate lines of half a unit at one kobo each total two kobo.
+- Values and aggregates above `9,007,199,254,740,991` kobo are rejected instead of rounded to an unsafe JavaScript number. Invalid checkout inputs show **—** until they can be calculated.
+- Repayments must be positive and cannot exceed that sale's outstanding balance. IndexedDB transactions and a PostgreSQL store lock serialize competing writes.
+- Repeating a saved request keeps its original receipt and does not charge or deduct stock again. Reusing its ID for changed customers, goods, amounts, or stock counts is rejected.
+
+Before a production release that changes these rules, run both applications' tests, the domain-copy check, and the PostgreSQL integration harness above against an isolated test database. The integration tests cover rounding, boundary amounts, concurrent repayments and stock deductions, rollback, retries after lost responses, and restoration. Connected browser checks are described in [frontend instructions](frontend/README.md).
+
 ## Stores and accounts
 
 - First use: enter a store name and create its local ledger, or sign in to restore a backed-up store.

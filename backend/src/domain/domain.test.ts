@@ -6,6 +6,7 @@ import {
   localDay,
   milliToDecimal,
   money,
+  MoneyRangeError,
   nairaInput,
   normalize,
   outstandingFor,
@@ -64,6 +65,47 @@ describe('exact naira and quantity arithmetic', () => {
     expect(money(Number.MAX_SAFE_INTEGER)).toBe('₦90,071,992,547,409.91');
     expect(nairaInput(Number.MAX_SAFE_INTEGER)).toBe('90071992547409.91');
   });
+  it('rounds each line half up to one kobo at the fractional boundary', () => {
+    expect(lineTotal('0.001', 499)).toBe(0);
+    expect(lineTotal('0.001', 500)).toBe(1);
+    expect(lineTotal('0.001', 501)).toBe(1);
+    expect(lineTotal('1.999', 125)).toBe(250);
+    expect(sumKobo([lineTotal('0.5', 1), lineTotal('0.5', 1)])).toBe(2);
+    expect(lineTotal('1', Number.MAX_SAFE_INTEGER)).toBe(Number.MAX_SAFE_INTEGER);
+    expect(() => lineTotal('1.001', Number.MAX_SAFE_INTEGER)).toThrow(MoneyRangeError);
+  });
+  it('round-trips exact kobo values through user input up to the supported limit', () => {
+    const values = [
+      0,
+      1,
+      9,
+      10,
+      99,
+      100,
+      101,
+      999,
+      10001,
+      Number.MAX_SAFE_INTEGER - 1,
+      Number.MAX_SAFE_INTEGER,
+    ];
+    let seed = 17;
+    for (let index = 0; index < 1000; index++) {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      values.push(seed * 1000000 + (index % 100));
+    }
+    for (const value of values) expect(parseNaira(nairaInput(value))).toBe(value);
+    expect(parseNaira('90071992547409.91')).toBe(Number.MAX_SAFE_INTEGER);
+    expect(() => parseNaira('90071992547409.92')).toThrow(MoneyRangeError);
+  });
+  it('rejects unsafe, non-finite and fractional kobo values before arithmetic or display', () => {
+    for (const value of [-1, 0.1, NaN, Infinity, -Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => lineTotal('1', value)).toThrow();
+      expect(() => sumKobo([value])).toThrow();
+      expect(() => money(value)).toThrow();
+      expect(() => nairaInput(value)).toThrow();
+    }
+    expect(sumKobo(Array(10000).fill(1))).toBe(10000);
+  });
   it('adds and subtracts fractional stock without binary floating point', () => {
     expect(milliToDecimal(decimalToMilli('15') - decimalToMilli('1.125'))).toBe('13.875');
     expect(milliToDecimal(-1n)).toBe('-0.001');
@@ -92,6 +134,25 @@ describe('ledger accounting', () => {
   it('uses Lagos day boundaries', () => {
     expect(localDay('2026-11-13T23:00:00.000Z')).toBe('2026-11-14');
     expect(localDay('2026-11-13T22:59:59.000Z')).toBe('2026-11-13');
+  });
+  it('assigns sales and repayments to the correct side of Lagos midnight', () => {
+    const before = '2026-11-13T22:59:59.999Z';
+    const after = '2026-11-13T23:00:00.000Z';
+    const s = sale(101, before);
+    const payments = [payment(s.id, 1, before), payment(s.id, 100, after)];
+    expect(dashboard([s], payments, new Date(before))).toEqual({
+      salesKobo: 101,
+      collectedKobo: 1,
+      owedKobo: 0,
+      saleCount: 1,
+    });
+    expect(dashboard([s], payments, new Date(after))).toEqual({
+      salesKobo: 0,
+      collectedKobo: 100,
+      owedKobo: 0,
+      saleCount: 0,
+    });
+    expect(paymentStatus(s, payments)).toBe('paid');
   });
   it('excludes voided sales and reversed payments from accounting', () => {
     const s = sale(1000);

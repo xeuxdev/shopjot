@@ -28,9 +28,14 @@ export function milliToDecimal(value: bigint): string {
   const fraction = (absolute % 1000n).toString().padStart(3, '0').replace(/0+$/, '');
   return `${value < 0n ? '-' : ''}${absolute / 1000n}${fraction ? `.${fraction}` : ''}`;
 }
+export class MoneyRangeError extends RangeError {
+  name = 'MoneyRangeError';
+  constructor() {
+    super('This amount is too large. Reduce the quantities or prices.');
+  }
+}
 function safeInteger(value: bigint): number {
-  if (value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER))
-    throw new Error('This amount is too large.');
+  if (value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) throw new MoneyRangeError();
   return Number(value);
 }
 export function parseNaira(value: string): number {
