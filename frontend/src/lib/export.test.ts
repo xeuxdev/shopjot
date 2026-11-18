@@ -33,7 +33,7 @@ async function sale(totalKobo: number, initialPaymentKobo = 0, customerId?: stri
     operationId: crypto.randomUUID(),
     customerId,
     customerName: 'Customer',
-    occurredAt: new Date().toISOString(),
+    occurredAt: '2026-11-18T12:40:43.000Z',
     initialPaymentKobo,
     items: [
       {
@@ -52,7 +52,7 @@ it('exports exact customer balances after part payments across multiple sales', 
   const first = await sale(101, 1);
   await sale(201, 2, first.customerId);
   await exportData('customers');
-  expect(await exported!.text()).toContain('"Customer","","299"');
+  expect(await exported!.text()).toContain('"Customer","","2.99"');
   expect(click).toHaveBeenCalledOnce();
 });
 
@@ -62,4 +62,21 @@ it('refuses an overflowing customer balance instead of downloading a rounded num
   await expect(exportData('customers')).rejects.toThrow('too large');
   expect(exported).toBeUndefined();
   expect(click).not.toHaveBeenCalled();
+});
+
+it('exports sales with exact decimal naira and a readable Lagos timestamp', async () => {
+  await sale(1245050, 45050);
+  await exportData('sales');
+  const csv = await exported!.text();
+  expect(csv).toContain('"Date (Africa/Lagos)","Total (NGN)","Outstanding (NGN)"');
+  expect(csv).toContain('"18/11/2026, 01:40:43 pm","12450.50","12000.00","partial"');
+  expect(csv).not.toContain('2026-11-18T12:40:43.000Z');
+});
+
+it('keeps the JSON backup in integer kobo and ISO timestamps', async () => {
+  await sale(101, 1);
+  await exportData('json');
+  const backup = JSON.parse(await exported!.text());
+  expect(backup.sales[0]).toMatchObject({ totalKobo: 101, occurredAt: '2026-11-18T12:40:43.000Z' });
+  expect(backup.payments[0].amountKobo).toBe(1);
 });

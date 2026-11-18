@@ -28,7 +28,9 @@
     "workbox-precaching": "^7.3.0",
     "workbox-routing": "^7.3.0",
     "workbox-core": "^7.3.0",
-    "zod": "^4.1.12"
+    "zod": "^4.1.12",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.9"
   },
   "devDependencies": {
     "@types/react": "^19.2.2",

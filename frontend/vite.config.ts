@@ -37,6 +37,7 @@ export default defineConfig(({ command, mode }) => {
           'icon-512.png',
           'icon-maskable-512.png',
           'apple-touch-icon.png',
+          'fonts/OFL.txt',
         ],
         manifest: {
           id: '/',
@@ -60,7 +61,7 @@ export default defineConfig(({ command, mode }) => {
           ],
         },
         injectManifest: {
-          globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+          globPatterns: ['**/*.{js,css,html,svg,png,woff2,ttf}'],
         },
       }),
     ],

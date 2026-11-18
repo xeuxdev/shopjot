@@ -28,7 +28,7 @@ import {
 } from '../domain/index';
 import type { Ledger } from '../lib/use-ledger';
 import { adjustStock, recordPayment, registerStock } from '../db/ledger';
-import { exportData } from '../lib/export';
+import { exportData, type ExportKind } from '../lib/export';
 import { userMessage } from '../lib/errors';
 import { BackupSettings } from '../features/sync/backup-settings';
 import { Button, Empty, ErrorMessage, Modal, SearchField, SectionTitle } from '../components/ui';
@@ -883,14 +883,14 @@ export function Stock({ data, notify }: { data: Ledger; notify: (message: string
 export function Settings({ data, notify }: { data: Ledger; notify: (message: string) => void }) {
   const [error, setError] = useState('');
   const [working, setWorking] = useState(false);
-  async function download(kind: 'sales' | 'customers' | 'json') {
+  async function download(kind: ExportKind) {
     setWorking(true);
     setError('');
     try {
       await exportData(kind);
       notify('Your export is ready');
-    } catch {
-      setError('Could not export your data. Please try again.');
+    } catch (error) {
+      setError(userMessage(error, 'Could not export your data. Please try again.'));
     } finally {
       setWorking(false);
     }
@@ -950,10 +950,14 @@ export function Settings({ data, notify }: { data: Ledger; notify: (message: str
         <section className="panel form-section">
           <h2>Export your records</h2>
           <p className="heading-description">
-            Download a copy for your own records. JSON includes the complete ledger; an import
-            screen is not available yet.
+            PDF and CSV show amounts in naira and dates in Africa/Lagos time. JSON keeps the
+            complete ledger in its original format; an import screen is not available yet.
           </p>
           <div className="export-actions">
+            <Button variant="outline" disabled={working} onClick={() => download('pdf')}>
+              <Download size={17} />
+              Export transactions PDF
+            </Button>
             <Button variant="outline" disabled={working} onClick={() => download('json')}>
               <Download size={17} />
               Download full JSON copy
