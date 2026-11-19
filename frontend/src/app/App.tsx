@@ -95,7 +95,7 @@ export function App() {
       />
     );
   return (
-    <div className="app-shell">
+    <div className={`app-shell${location.pathname === '/sales/new' ? ' sale-entry-active' : ''}`}>
       <a className="skip-link" href="#main">
         Skip to content
       </a>
@@ -215,7 +215,10 @@ export function App() {
               <Route path="/sales/new" element={<SaleEntry notify={setToast} />} />
               <Route path="/sales/:id" element={<SaleDetail data={data} notify={setToast} />} />
               <Route path="/customers" element={<Customers data={data} />} />
-              <Route path="/customers/:id" element={<CustomerDetail data={data} />} />
+              <Route
+                path="/customers/:id"
+                element={<CustomerDetail data={data} notify={setToast} />}
+              />
               <Route path="/stock" element={<Stock data={data} notify={setToast} />} />
               <Route path="/settings" element={<Settings data={data} notify={setToast} />} />
               <Route

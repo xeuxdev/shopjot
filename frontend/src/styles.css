@@ -41,6 +41,7 @@ body {
 }
 button,
 input,
+textarea,
 select {
   font: inherit;
 }
@@ -67,6 +68,10 @@ a {
 button:focus-visible,
 a:focus-visible,
 input:focus-visible {
+  outline: 3px solid #74a88a;
+  outline-offset: 3px;
+}
+textarea:focus-visible {
   outline: 3px solid #74a88a;
   outline-offset: 3px;
 }
@@ -1572,7 +1577,7 @@ input::placeholder {
   border: 1px solid #dce6d4;
   border-radius: 10px;
   box-shadow: 0 5px 30px #17341617;
-  z-index: 80;
+  z-index: 50;
   font-size: 12px;
   width: max-content;
   max-width: calc(100vw - 32px);
@@ -2522,4 +2527,232 @@ input::placeholder {
 }
 .greeting {
   overflow-wrap: anywhere;
+}
+
+/* Sale entry and receipt recovery. */
+.sale-form-fields {
+  display: contents;
+}
+.sale-fields > .form-section {
+  overflow: visible;
+}
+.dialog-content .field > .field-hint {
+  margin-top: 7px;
+}
+.field textarea {
+  width: 100%;
+  min-height: 100px;
+  resize: vertical;
+  border: 1px solid #d5ded6;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+  font-size: 16px;
+  color: inherit;
+}
+input:not([type='radio']):not([type='checkbox'])[aria-invalid='true'],
+.field textarea[aria-invalid='true'] {
+  border-color: #a22e27;
+  box-shadow: 0 0 0 1px #a22e27;
+}
+.field-error {
+  font-size: 12px;
+  color: #a22e27;
+  line-height: 1.5;
+  margin: 7px 0 12px;
+}
+.draft-actions,
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.draft-actions .draft-label {
+  margin: 0;
+  font-size: 12px;
+}
+.draft-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px;
+  margin-bottom: 22px;
+  border: 1px solid #cdded2;
+  border-radius: 9px;
+  background: #edf5ef;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.draft-banner > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.correction-note {
+  margin-bottom: 22px;
+}
+.correction-note > p,
+.sale-actions-panel > p {
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 10px 0 16px;
+}
+.correction-note > a,
+.sale-actions-panel > a {
+  display: inline-block;
+  color: var(--green);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  margin: 4px 0 16px;
+  font-size: 13px;
+}
+.sale-actions-panel {
+  margin-top: 22px;
+}
+.save-another {
+  margin-top: 10px;
+}
+.recent-goods {
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 18px;
+}
+.recent-goods > p {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.recent-goods > p > span {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  color: #52644f;
+  margin-top: 4px;
+}
+.recent-goods > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.recent-goods button {
+  max-width: 100%;
+  min-height: 48px;
+  text-align: left;
+  border: 1px solid #d5ded6;
+  border-radius: 8px;
+  background: #f6f8f6;
+  color: #253b31;
+  padding: 8px 12px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.recent-goods small {
+  display: block;
+  margin-top: 3px;
+  color: #52644f;
+}
+.mobile-checkout-bar {
+  display: none;
+}
+.sale-summary {
+  scroll-margin-top: 20px;
+}
+.allocation-sales {
+  max-height: 240px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin-bottom: 16px;
+}
+.allocation-sale {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  min-height: 56px;
+}
+.allocation-sale input {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  accent-color: var(--green);
+}
+.allocation-sale > span {
+  flex: 1;
+  min-width: 0;
+}
+.allocation-sale small {
+  display: block;
+  margin-top: 3px;
+  color: #52644f;
+}
+.allocation-preview {
+  border-top: 1px solid var(--line);
+  margin: 16px 0;
+  padding-top: 16px;
+}
+.allocation-preview h3 {
+  margin-bottom: 12px;
+}
+.status-badge.voided {
+  background: #edf0ed;
+  color: #4f5b52;
+}
+@media (max-width: 760px) {
+  .sale-page {
+    padding-bottom: 80px;
+  }
+  .sale-entry-active .toast {
+    bottom: calc(160px + env(safe-area-inset-bottom));
+  }
+  .mobile-checkout-bar {
+    position: fixed;
+    z-index: 19;
+    left: 0;
+    right: 0;
+    bottom: calc(73px + env(safe-area-inset-bottom));
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 72px;
+    padding: 12px 20px;
+    border-top: 1px solid #d5ded6;
+    background: #fff;
+    box-shadow: 0 -3px 12px #174f3b08;
+  }
+  .mobile-checkout-bar > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .mobile-checkout-bar span,
+  .mobile-checkout-bar strong {
+    display: block;
+  }
+  .mobile-checkout-bar span {
+    color: #52644f;
+    font-size: 12px;
+  }
+  .mobile-checkout-bar strong {
+    font-size: 18px;
+  }
+  .mobile-checkout-bar .button {
+    flex-shrink: 0;
+  }
+  .sale-page .local-save-note {
+    margin-bottom: 8px;
+  }
+  .draft-actions {
+    margin-top: 12px;
+  }
+  .allocation-sale {
+    font-size: 12px;
+  }
+  .customer-summary {
+    flex-wrap: wrap;
+    gap: 16px;
+  }
 }

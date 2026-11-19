@@ -40,6 +40,9 @@ export const saleRecord = z.object({
   totalKobo: money,
   occurredAt: time,
   status: z.enum(['active', 'voided']),
+  voidedAt: time.optional(),
+  voidReason: z.string().trim().min(1).max(500).optional(),
+  replacesSaleId: id.optional(),
 });
 export const itemRecord = z.object({
   ...scoped,
@@ -68,6 +71,14 @@ export const movementRecord = z.object({
   occurredAt: time,
 });
 const envelope = { version: z.literal(1), operationId: id, storeId: id, deviceId: id };
+export const voidPayloadSchema = z.object({
+  saleId: id,
+  reason: z.string().trim().min(1).max(500),
+  occurredAt: time,
+  expectedPaymentIds: z.array(id),
+  reversals: z.array(paymentRecord),
+  movements: z.array(movementRecord).max(100),
+});
 export const syncOperationSchema = z.discriminatedUnion('kind', [
   z.object({
     ...envelope,
@@ -79,9 +90,20 @@ export const syncOperationSchema = z.discriminatedUnion('kind', [
       payment: paymentRecord.nullable(),
       movements: z.array(movementRecord).max(100),
       allowNegativeStock: z.boolean(),
+      correction: voidPayloadSchema.optional(),
+      replacementPayments: z.array(paymentRecord).optional(),
     }),
   }),
   z.object({ ...envelope, kind: z.literal('payment.create'), payload: paymentRecord }),
+  z.object({ ...envelope, kind: z.literal('sale.void'), payload: voidPayloadSchema }),
+  z.object({
+    ...envelope,
+    kind: z.literal('payment.allocate'),
+    payload: z.object({
+      customerId: id,
+      payments: z.array(paymentRecord).min(1).max(100),
+    }),
+  }),
   z.object({
     ...envelope,
     kind: z.literal('stock.register'),

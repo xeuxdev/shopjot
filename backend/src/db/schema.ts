@@ -118,6 +118,9 @@ export const sales = pgTable(
     totalKobo: bigint('total_kobo', { mode: 'bigint' }).notNull(),
     occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
     status: text().default('active').notNull(),
+    voidedAt: timestamp('voided_at', { withTimezone: true }),
+    voidReason: text('void_reason'),
+    replacesSaleId: uuid('replaces_sale_id'),
     updatedAt: updatedAt(),
   },
   (t) => [
@@ -130,6 +133,7 @@ export const sales = pgTable(
     }),
     check('sale_total_valid', sql`${t.totalKobo} between 0 and 9007199254740991`),
     check('sale_status_valid', sql`${t.status} in ('active', 'voided')`),
+    foreignKey({ columns: [t.storeId, t.replacesSaleId], foreignColumns: [t.storeId, t.id] }),
   ],
 );
 export const saleItems = pgTable(

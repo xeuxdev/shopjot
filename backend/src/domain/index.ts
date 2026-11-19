@@ -98,6 +98,13 @@ export const saleInputSchema = z
     items: z.array(saleItemInputSchema).min(1, 'Add at least one item.').max(100),
     initialPaymentKobo: koboSchema,
     allowNegativeStock: z.boolean().default(false),
+    correction: z
+      .object({
+        saleId: z.uuid(),
+        reason: z.string().trim().min(1, 'Enter a reason for the correction.').max(500),
+        expectedPaymentIds: z.array(z.uuid()),
+      })
+      .optional(),
   })
   .superRefine((sale, ctx) => {
     try {
@@ -129,6 +136,9 @@ export interface Sale extends Scoped {
   totalKobo: number;
   occurredAt: string;
   status: 'active' | 'voided';
+  voidedAt?: string;
+  voidReason?: string;
+  replacesSaleId?: string;
 }
 export interface SaleItem extends Scoped {
   saleId: string;
@@ -171,7 +181,13 @@ export interface OutboxOperation {
   operationId: string;
   storeId: string;
   deviceId: string;
-  kind: 'sale.create' | 'payment.create' | 'stock.register' | 'stock.adjust';
+  kind:
+    | 'sale.create'
+    | 'sale.void'
+    | 'payment.create'
+    | 'payment.allocate'
+    | 'stock.register'
+    | 'stock.adjust';
   payload: unknown;
   createdAt: string;
   status: 'pending' | 'failed' | 'acknowledged';
@@ -193,6 +209,25 @@ export function receivedFor(saleId: string, payments: Payment[]): number {
 }
 export function outstandingFor(sale: Sale, payments: Payment[]): number {
   return sale.status === 'voided' ? 0 : sale.totalKobo - receivedFor(sale.id, payments);
+}
+export function activePayments(saleId: string, payments: Payment[]) {
+  const reversed = new Set(payments.filter((p) => p.reversalOf).map((p) => p.reversalOf));
+  return payments.filter((p) => p.saleId === saleId && !p.reversalOf && !reversed.has(p.id));
+}
+// Allocate oldest first, so the preview and the saved payment always agree.
+export function allocatePayment(sales: Sale[], payments: Payment[], amountKobo: number) {
+  koboSchema.positive('Enter an amount greater than zero.').parse(amountKobo);
+  const ordered = [...sales].sort(
+    (a, b) => a.occurredAt.localeCompare(b.occurredAt) || a.id.localeCompare(b.id),
+  );
+  if (amountKobo > sumKobo(ordered.map((sale) => outstandingFor(sale, payments))))
+    throw new Error('Payment cannot exceed the amount still owed on the selected sales.');
+  let remaining = amountKobo;
+  return ordered.flatMap((sale) => {
+    const amount = Math.min(remaining, outstandingFor(sale, payments));
+    remaining -= amount;
+    return amount > 0 ? [{ saleId: sale.id, amountKobo: amount }] : [];
+  });
 }
 export function paymentStatus(sale: Sale, payments: Payment[]): 'paid' | 'partial' | 'unpaid' {
   const received = receivedFor(sale.id, payments);

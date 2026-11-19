@@ -22,6 +22,13 @@
       "when": 1794677627072,
       "tag": "0002_bent_the_hood",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795092703102,
+      "tag": "0003_audited_sale_corrections",
+      "breakpoints": true
     }
   ]
 }

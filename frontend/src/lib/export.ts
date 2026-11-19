@@ -60,6 +60,9 @@ export async function exportData(kind: ExportKind) {
             'Total (NGN)',
             'Outstanding (NGN)',
             'Payment status',
+            'Void reason',
+            'Voided at (Africa/Lagos)',
+            'Replaces sale ID',
           ],
           ...data.sales.map((s) => [
             s.id,
@@ -67,7 +70,10 @@ export async function exportData(kind: ExportKind) {
             formatReportDate(s.occurredAt),
             reportNaira(s.totalKobo),
             reportNaira(outstandingFor(s, data.payments)),
-            paymentStatus(s, data.payments),
+            s.status === 'voided' ? 'voided' : paymentStatus(s, data.payments),
+            s.voidReason ?? '',
+            s.voidedAt ? formatReportDate(s.voidedAt) : '',
+            s.replacesSaleId ?? '',
           ]),
         ]
       : [

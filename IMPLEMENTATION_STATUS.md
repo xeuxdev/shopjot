@@ -1,21 +1,21 @@
-# Implementation status — 18 November 2026
+# Implementation status — 19 November 2026
 
 Shopjot is now a multi-store offline ledger with optional owner accounts for verified backup. The original handoff remains product context; the later requirements replace the single-store branding and add named-store setup. Frontend and backend remain independently deployable in Dokploy, with Neon PostgreSQL behind the API.
 
 ## Implemented
 
-| Area             | Result                                                                                                                                                                  |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Structure        | Independent `frontend/` and `backend/` applications, each with its own npm lockfile, configuration, domain rules, Dockerfile, and environment example                   |
-| Local ledger     | Required customer names, arbitrary goods/units, fractional quantities, full/partial/unpaid sales, drafts, immutable sale snapshots                                      |
-| Payments/reports | Repayments against a selected sale; separate daily sales/collections; customer balances; Lagos day boundaries                                                           |
-| Inventory        | Explicit product-unit links, transactional stock movements, manual counts, shortage approval, no guessed conversions                                                    |
-| Accounts         | Owner registration/login, scrypt password hashes, opaque HttpOnly/Secure/SameSite sessions, origin checks, rate limiting, logout                                        |
-| Sync             | Durable ordered outbox; transactionally acknowledged idempotent pushes; paginated pulls; backoff/jitter; startup/reconnect/foreground/manual/native background triggers |
-| Verification     | Server cursor, counts, and complete SHA-256 ledger checksum before claiming “Backed up”                                                                                 |
-| Recovery         | Verified restore on additional devices; every phone using the shared store login can record sales                                                                         |
-| Deployment       | Two independent Dokploy Applications; static Nginx frontend calls the API URL directly; credentialed CORS; Neon pooled/direct runtime URLs; locked startup migrations   |
-| Data safety      | Store-scoped CSV/JSON exports, persistent storage request, clear pending/error/backup state; no credential export                                                       |
+| Area             | Result                                                                                                                                                                                   |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Structure        | Independent `frontend/` and `backend/` applications, each with its own npm lockfile, configuration, domain rules, Dockerfile, and environment example                                    |
+| Local ledger     | Required customer names, arbitrary goods/units, fractional quantities, full/partial/unpaid sales, recoverable drafts with save status, audited correction/voiding and preserved receipts |
+| Payments/reports | Repayments against one sale or an atomic allocation across selected sales; separate daily sales/collections; customer balances; Lagos day boundaries; audit columns in sales CSV         |
+| Inventory        | Explicit product-unit links, transactional stock movements, manual counts, shortage approval, no guessed conversions                                                                     |
+| Accounts         | Owner registration/login, scrypt password hashes, opaque HttpOnly/Secure/SameSite sessions, origin checks, rate limiting, logout                                                         |
+| Sync             | Durable ordered outbox; transactionally acknowledged idempotent pushes; paginated pulls; backoff/jitter; startup/reconnect/foreground/manual/native background triggers                  |
+| Verification     | Server cursor, counts, and complete SHA-256 ledger checksum before claiming “Backed up”                                                                                                  |
+| Recovery         | Verified restore on additional devices; every phone using the shared store login can record sales                                                                                        |
+| Deployment       | Two independent Dokploy Applications; static Nginx frontend calls the API URL directly; credentialed CORS; Neon pooled/direct runtime URLs; locked startup migrations                    |
+| Data safety      | Store-scoped CSV/JSON exports, persistent storage request, clear pending/error/backup state; no credential export                                                                        |
 
 ## Store lifecycle
 
@@ -25,7 +25,17 @@ Registration sends this existing ID and the chosen name to the backend and signs
 
 All local records and meaningful drafts are checked before switching to another store ID. A draft entered while a sign-in request is in flight also prevents replacement. An authentication check that finishes after sign-out cannot unlock the ledger or resume backup. Each browser profile currently holds one local store, and each account owns one store; the deployed service serves many independent stores.
 
-Existing installations get a named store profile in place, using the account name or original legacy store name. Their database name, device/store IDs, financial records, drafts, queue and sessions are retained. Internal cookie, IndexedDB, lock and background-sync identifiers intentionally retain their old names for compatibility. Store ID/name were already persisted server-side, so no new PostgreSQL schema migration is required.
+Existing installations get a named store profile in place, using the account name or original legacy store name. Their database name, device/store IDs, financial records, drafts, queue and sessions are retained. Internal cookie, IndexedDB, lock and background-sync identifiers intentionally retain their old names for compatibility. Store naming did not require a PostgreSQL schema change; audited corrections now add migration `0003_audited_sale_corrections` for void reasons, dates and replacement links.
+
+## UX improvements verified on 19 November
+
+Mobile sale entry keeps a total and **Review & save** shortcut above navigation. Validation identifies and focuses invalid fields. Draft status reflects completed storage writes and supports retry, resume and confirmed discard. Recent goods reuse the last unit/price, and **Save & record another** resets the receipt and focuses the next customer. Suggestions remain reachable by keyboard. Notifications stay above mobile checkout and below modal dialogs.
+
+Customer payments preview an oldest-first allocation across up to 100 selected sales. A correction requires a reason and saves the replacement, original void, payment reversals and stock reversals in one local transaction and one server operation. Original collection dates and sale dates are preserved. Concurrent payments block stale corrections or allocations without partially changing server records. Receipts, reasons, reversal history and replacement links remain visible and are retained in exports.
+
+Verification: 63 frontend unit tests, 15 backend unit tests, four PostgreSQL constraint tests, and 14 cross-application PostgreSQL sync tests passed. Browser checks covered offline sales, draft recovery and failure/retry, consecutive sales, allocation previews, correction/void history, keyboard selection, exports, and accessibility. Both production builds, both linters, shared-domain equality and diff whitespace checks passed. PostgreSQL used a temporary container without mounted data; no remote deployment was changed.
+
+Deploy the migrated backend before the updated frontend. Installed clients need the updated audit fields and operation kinds. Earlier verification results below are historical.
 
 ## Reliability details
 
@@ -74,13 +84,13 @@ Use HTTPS subdomains on the same parent domain, e.g. `shop.example.com` and `api
 
 The local-development PostgreSQL Compose file now lives in `backend/docker-compose.yml`. It retains the `shopjot` project and volume name to preserve existing local data. Production uses Neon.
 
-Keep the existing frontend domain and Neon database when replacing an older deployment. Browser storage names, record IDs, schema migrations, queue semantics, and account IDs are unchanged. Sign in once again because the session cookie now belongs to the backend host.
+Keep the existing frontend domain and Neon database when replacing an older deployment. Browser storage names, record IDs, existing migration history, queue ordering, and account IDs are retained. Apply the added audit migration before the updated frontend. Sign in once again when moving from the legacy same-origin deployment because the session cookie now belongs to the backend host.
 
 No Neon credentials were supplied, so the actual Neon connection, remote Dokploy deployment, domain certificate, and physical Android/iPhone installation remain unverified. No remote Git push, DNS change, or publication was performed.
 
 ## Practical limits and remaining work
 
 - Background work after the browser/app closes is best-effort and browser-controlled. Durable pending records resume whenever the app or service worker can run with connectivity. Lost/cleared device storage before acknowledgment can still lose unbacked records.
-- The MVP supports one primary editing device. Takeover prevents further old-device writes on the server; unsynced changes left on an old offline phone are preserved there and require explicit recovery rather than an automatic conflicting merge.
+- Multiple signed-in phones can write after verified restore. Stale repayments, corrections and stock counts can require review; failed operations remain local and block the queue rather than silently overriding newer history.
 - This trusted phone stays available offline after sign-in. Local IndexedDB is not encrypted by the app. Signing out locks the local interface without deleting records; signing in again needs internet.
-- Self-service password reset, JSON import, audited correction/voiding UI, physical-device performance testing, and owner trial remain follow-up work. No unsupported corrections, OCR, or AI scanning are claimed.
+- Self-service password reset, JSON import, physical-device performance testing, and owner trial remain follow-up work. OCR and AI scanning are not implemented.

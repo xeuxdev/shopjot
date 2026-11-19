@@ -106,6 +106,14 @@ Sync resumes on writes, startup, reconnect, foregrounding, periodic checks, and 
 
 Phones finish their initial restore before creating new records. Sales saved on different phones merge by unique operation IDs, and the server records the originating device. If offline phones sell against the same stock count, both sales are kept and their movements can produce a visible negative stock count. Conflicting repayments or stale absolute stock adjustments are kept locally and flagged for review; they cannot silently overpay a sale or overwrite newer stock history. A shared login identifies the store account, not the individual storekeeper.
 
-JSON import, audited correction/voiding UI, and password reset remain follow-up work. Local browser data is not encrypted by this app.
+Sale entry shows saving, saved and failed draft states, restores unfinished entries, and offers draft discard with confirmation. Recent goods reuse their last unit and price; **Save & record another** starts a fresh receipt. Mobile checkout keeps the total and a payment-review shortcut within reach, and invalid fields show specific messages and receive focus.
+
+Customer ledgers accept repayments across up to 100 selected unpaid sales, with an oldest-first allocation preview. The complete allocation saves atomically and uses one idempotent sync operation; changed balances cannot produce a partial payment.
+
+Use **Correct sale** to prepare a replacement receipt with a required reason. The original stays active until the replacement saves. Saving reverses its recorded payments and linked stock movements, marks it voided, and creates the replacement in one local transaction and one server operation. Both receipts remain linked in history. Existing collection dates and the original sale date are preserved; if the recorded paid amount decreases, the newest payments are reduced first, and any increase is recorded at the correction time. **Void sale** also requires a reason and reverses recorded payments and linked stock. These actions record ledger changes; handle cash refunds separately. A payment added on another phone while a correction is pending blocks that operation for review rather than silently removing the payment.
+
+Deploy the backend with migration `0003_audited_sale_corrections` before deploying the updated frontend. Existing ledgers keep their records; no IndexedDB schema upgrade is needed. Installed clients should update to read the new audit fields and sync operations.
+
+JSON import and password reset remain follow-up work. Local browser data is not encrypted by this app.
 
 The original [handoff](Doris_Foods_Codex_Handoff.md) remains product context; this independent-folder layout follows the user's later instruction and replaces its suggested workspace layout. See [implementation status](IMPLEMENTATION_STATUS.md) for verification details.

@@ -9,6 +9,8 @@ import {
   milliToDecimal,
   nameSchema,
   koboSchema,
+  activePayments,
+  type Payment,
   type SaleInput,
   type SyncOperation,
 } from '../domain/index';
@@ -52,10 +54,17 @@ function sameSaleRequest(
   // the original receipt and time; its customer, goods and money must still match.
   return (
     saved.sale.id === input.id &&
+    saved.correction?.saleId === input.correction?.saleId &&
+    saved.correction?.reason === input.correction?.reason &&
+    [...(saved.correction?.expectedPaymentIds ?? [])].sort().join() ===
+      [...(input.correction?.expectedPaymentIds ?? [])].sort().join() &&
+    (!input.correction || saved.sale.occurredAt === input.occurredAt) &&
     (input.customerId
       ? saved.customer.id === input.customerId
       : saved.customer.name === input.customerName) &&
-    (saved.payment?.amountKobo ?? 0) === input.initialPaymentKobo &&
+    sumKobo(
+      saved.replacementPayments?.map((p) => p.amountKobo) ?? [saved.payment?.amountKobo ?? 0],
+    ) === input.initialPaymentKobo &&
     saved.items.length === input.items.length &&
     saved.items.every((item, position) => {
       const incoming = input.items[position];
@@ -106,6 +115,28 @@ export async function saveSale(raw: SaleInput, database: LedgerDB = db) {
           'The saved sale could not be found. Keep this ledger and review its records.',
         );
       const createdAt = new Date().toISOString();
+      if (input.correction) {
+        const original = await database.sales.get(input.correction.saleId);
+        if (original?.occurredAt !== input.occurredAt)
+          throw new Error(
+            'A correction must preserve the original sale date. Reopen the original receipt.',
+          );
+      }
+      const originalPayments = input.correction
+        ? activePayments(input.correction.saleId, await database.payments.toArray()).sort(
+            (a, b) => a.receivedAt.localeCompare(b.receivedAt) || a.id.localeCompare(b.id),
+          )
+        : [];
+      const correction = input.correction
+        ? await reverseSale(
+            database,
+            storeId,
+            input.correction.saleId,
+            input.correction.reason,
+            createdAt,
+            input.correction.expectedPaymentIds,
+          )
+        : undefined;
       let customer = input.customerId ? await database.customers.get(input.customerId) : undefined;
       if (input.customerId && (!customer || customer.storeId !== storeId))
         throw new Error('Choose an existing customer again.');
@@ -169,11 +200,12 @@ export async function saveSale(raw: SaleInput, database: LedgerDB = db) {
         occurredAt: input.occurredAt,
         status: 'active' as const,
         createdAt,
+        ...(correction ? { replacesSaleId: correction.saleId } : {}),
       };
       await database.sales.add(sale);
       await database.saleItems.bulkAdd(items);
       const payment =
-        input.initialPaymentKobo > 0
+        input.initialPaymentKobo > 0 && !correction
           ? {
               id: crypto.randomUUID(),
               storeId,
@@ -185,6 +217,36 @@ export async function saveSale(raw: SaleInput, database: LedgerDB = db) {
             }
           : null;
       if (payment) await database.payments.add(payment);
+      // Keep prior collection dates when correcting a receipt. A changed paid
+      // amount trims the latest payments first; any extra is collected now.
+      const replacementPayments = correction ? ([] as Payment[]) : undefined;
+      if (replacementPayments) {
+        let remaining = input.initialPaymentKobo;
+        for (const original of originalPayments) {
+          const amountKobo = Math.min(remaining, original.amountKobo);
+          if (amountKobo > 0)
+            replacementPayments.push({
+              ...original,
+              id: crypto.randomUUID(),
+              saleId: sale.id,
+              amountKobo,
+              createdAt,
+              reversalOf: null,
+            });
+          remaining -= amountKobo;
+        }
+        if (remaining > 0)
+          replacementPayments.push({
+            id: crypto.randomUUID(),
+            storeId,
+            saleId: sale.id,
+            amountKobo: remaining,
+            receivedAt: createdAt,
+            createdAt,
+            reversalOf: null,
+          });
+        await database.payments.bulkAdd(replacementPayments);
+      }
       await enqueue(database, identity, input.operationId, 'sale.create', {
         sale,
         customer,
@@ -192,8 +254,189 @@ export async function saveSale(raw: SaleInput, database: LedgerDB = db) {
         payment,
         movements,
         allowNegativeStock: input.allowNegativeStock,
+        ...(correction ? { correction, replacementPayments } : {}),
       });
       return sale;
+    },
+  );
+}
+async function reverseSale(
+  database: LedgerDB,
+  storeId: string,
+  saleId: string,
+  reason: string,
+  occurredAt: string,
+  expectedPaymentIds?: string[],
+) {
+  reason = z.string().trim().min(1, 'Enter a reason.').max(500).parse(reason);
+  const sale = await database.sales.get(saleId);
+  if (!sale || sale.storeId !== storeId || sale.status !== 'active')
+    throw new Error('This sale is no longer active. Open its receipt to review it.');
+  const payments = activePayments(
+    saleId,
+    await database.payments.where('saleId').equals(saleId).toArray(),
+  );
+  if (
+    expectedPaymentIds &&
+    [...expectedPaymentIds].sort().join() !==
+      payments
+        .map((p) => p.id)
+        .sort()
+        .join()
+  )
+    throw new Error(
+      'Payments changed while you were preparing this correction. Discard this draft and reopen the sale to review the latest payments.',
+    );
+  const reversals = payments.map((p) => ({
+    ...p,
+    id: crypto.randomUUID(),
+    reversalOf: p.id,
+    createdAt: occurredAt,
+    receivedAt: occurredAt,
+  }));
+  const items = await database.saleItems.where('saleId').equals(saleId).toArray();
+  const movements = [];
+  for (const item of items) {
+    if (!item.productUnitId) continue;
+    const unit = await database.productUnits.get(item.productUnitId);
+    if (!unit || unit.storeId !== storeId)
+      throw new Error('The original stock item is unavailable.');
+    await database.productUnits.update(unit.id, {
+      quantityOnHand: milliToDecimal(
+        decimalToMilli(unit.quantityOnHand) + decimalToMilli(item.quantity),
+      ),
+      updatedAt: occurredAt,
+    });
+    movements.push({
+      id: crypto.randomUUID(),
+      storeId,
+      productUnitId: unit.id,
+      saleItemId: item.id,
+      quantityDelta: item.quantity,
+      reason: 'reversal' as const,
+      occurredAt,
+      createdAt: occurredAt,
+    });
+  }
+  await database.sales.update(saleId, {
+    status: 'voided',
+    voidReason: reason,
+    voidedAt: occurredAt,
+  });
+  await database.payments.bulkAdd(reversals);
+  await database.stockMovements.bulkAdd(movements);
+  return {
+    saleId,
+    reason,
+    occurredAt,
+    expectedPaymentIds: payments.map((p) => p.id),
+    reversals,
+    movements,
+  };
+}
+
+export async function voidSale(
+  saleId: string,
+  reason: string,
+  expectedPaymentIds: string[],
+  operationId: string,
+  database: LedgerDB = db,
+) {
+  z.uuid().parse(operationId);
+  reason = z.string().trim().min(1, 'Enter a reason.').max(500).parse(reason);
+  const identity = await getIdentity(database);
+  return database.transaction('rw', database.tables, async () => {
+    await assertCanWrite(database);
+    if (
+      await isReplay(
+        database,
+        identity,
+        operationId,
+        'sale.void',
+        (p) =>
+          p.saleId === saleId &&
+          p.reason === reason &&
+          [...p.expectedPaymentIds].sort().join() === [...expectedPaymentIds].sort().join(),
+      )
+    )
+      return;
+    const payload = await reverseSale(
+      database,
+      identity.storeId,
+      saleId,
+      reason,
+      new Date().toISOString(),
+      expectedPaymentIds,
+    );
+    await enqueue(database, identity, operationId, 'sale.void', payload);
+  });
+}
+
+export async function recordCustomerPayment(
+  customerId: string,
+  allocations: { saleId: string; amountKobo: number }[],
+  operationId: string,
+  database: LedgerDB = db,
+) {
+  z.uuid().parse(operationId);
+  if (
+    !allocations.length ||
+    allocations.length > 100 ||
+    new Set(allocations.map((p) => p.saleId)).size !== allocations.length
+  )
+    throw new Error('Select between one and 100 different sales.');
+  allocations.forEach((p) =>
+    koboSchema.positive('Enter an amount greater than zero.').parse(p.amountKobo),
+  );
+  sumKobo(allocations.map((p) => p.amountKobo));
+  const identity = await getIdentity(database);
+  return database.transaction(
+    'rw',
+    [database.sales, database.payments, database.outbox, database.metadata],
+    async () => {
+      await assertCanWrite(database);
+      if (
+        await isReplay(
+          database,
+          identity,
+          operationId,
+          'payment.allocate',
+          (p) =>
+            p.customerId === customerId &&
+            p.payments.length === allocations.length &&
+            p.payments.every(
+              (payment, i) =>
+                payment.saleId === allocations[i].saleId &&
+                payment.amountKobo === allocations[i].amountKobo,
+            ),
+        )
+      )
+        return;
+      const now = new Date().toISOString();
+      const payments = [];
+      for (const allocation of allocations) {
+        const sale = await database.sales.get(allocation.saleId);
+        if (
+          !sale ||
+          sale.storeId !== identity.storeId ||
+          sale.customerId !== customerId ||
+          sale.status !== 'active'
+        )
+          throw new Error('A selected sale is no longer available. Review the customer’s balance.');
+        const previous = await database.payments.where('saleId').equals(sale.id).toArray();
+        if (allocation.amountKobo > outstandingFor(sale, previous))
+          throw new Error('A balance changed. Review the payment allocation before saving.');
+        payments.push({
+          id: crypto.randomUUID(),
+          storeId: identity.storeId,
+          ...allocation,
+          receivedAt: now,
+          createdAt: now,
+          reversalOf: null,
+        });
+      }
+      await database.payments.bulkAdd(payments);
+      await enqueue(database, identity, operationId, 'payment.allocate', { customerId, payments });
     },
   );
 }

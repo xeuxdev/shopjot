@@ -11,6 +11,7 @@ import {
   outstandingFor,
   snapshotJson,
   sumKobo,
+  activePayments,
   type SyncChange,
   type SyncOperation,
 } from './domain/index';
@@ -61,9 +62,10 @@ async function insertMovement(
 async function insertPayment(
   tx: Transaction,
   payment: Extract<SyncChange, { entity: 'payments' }>['record'],
+  audited = false,
 ) {
   requireRule(
-    payment.reversalOf === null,
+    audited || payment.reversalOf === null,
     'Use the audited correction flow for payment reversals.',
   );
   await tx.insert(s.payments).values({
@@ -73,6 +75,126 @@ async function insertPayment(
     createdAt: new Date(payment.createdAt),
   });
   await emit(tx, { entity: 'payments', record: payment });
+}
+type VoidPayload = Extract<SyncOperation, { kind: 'sale.void' }>['payload'];
+async function reverseSale(tx: Transaction, storeId: string, payload: VoidPayload) {
+  const [sale] = await tx
+    .select()
+    .from(s.sales)
+    .where(and(eq(s.sales.id, payload.saleId), eq(s.sales.storeId, storeId)));
+  requireRule(sale?.status === 'active', 'This sale is no longer active. Review its receipt.');
+  const payments = activePayments(
+    sale.id,
+    (
+      await tx
+        .select()
+        .from(s.payments)
+        .where(and(eq(s.payments.saleId, sale.id), eq(s.payments.storeId, storeId)))
+    ).map(dto.payments),
+  );
+  requireRule(
+    [...payload.expectedPaymentIds].sort().join() ===
+      payments
+        .map((p) => p.id)
+        .sort()
+        .join(),
+    'Payments changed on another phone. Keep an export and review this correction before retrying.',
+  );
+  requireRule(
+    payload.reversals.length === payments.length &&
+      new Set(payload.reversals.map((p) => p.reversalOf)).size === payments.length,
+    'Every original payment needs exactly one reversal.',
+  );
+  for (const payment of payments) {
+    const reversal = payload.reversals.find((p) => p.reversalOf === payment.id);
+    requireRule(
+      reversal &&
+        reversal.saleId === sale.id &&
+        reversal.amountKobo === payment.amountKobo &&
+        reversal.receivedAt === payload.occurredAt &&
+        reversal.createdAt === payload.occurredAt,
+      'Invalid payment reversal.',
+    );
+    await insertPayment(tx, reversal, true);
+  }
+  const items = (
+    await tx
+      .select()
+      .from(s.saleItems)
+      .where(and(eq(s.saleItems.saleId, sale.id), eq(s.saleItems.storeId, storeId)))
+  )
+    .map(dto.items)
+    .filter((i) => i.productUnitId);
+  requireRule(
+    payload.movements.length === items.length &&
+      new Set(payload.movements.map((m) => m.saleItemId)).size === items.length,
+    'Every linked original item needs exactly one stock reversal.',
+  );
+  for (const item of items) {
+    const movement = payload.movements.find((m) => m.saleItemId === item.id);
+    requireRule(
+      movement &&
+        movement.reason === 'reversal' &&
+        movement.productUnitId === item.productUnitId &&
+        movement.occurredAt === payload.occurredAt &&
+        decimalToMilli(movement.quantityDelta) === decimalToMilli(item.quantity),
+      'Invalid stock reversal.',
+    );
+    const unit = await getUnit(tx, storeId, item.productUnitId!);
+    const [updated] = await tx
+      .update(s.productUnits)
+      .set({
+        quantityOnHand: milliToDecimal(
+          decimalToMilli(unit.quantityOnHand) + decimalToMilli(item.quantity),
+        ),
+        updatedAt: new Date(payload.occurredAt),
+      })
+      .where(eq(s.productUnits.id, unit.id))
+      .returning();
+    await emit(tx, { entity: 'units', record: dto.units(updated) });
+    await insertMovement(tx, movement);
+  }
+  const [updated] = await tx
+    .update(s.sales)
+    .set({
+      status: 'voided',
+      voidReason: payload.reason,
+      voidedAt: new Date(payload.occurredAt),
+      updatedAt: new Date(payload.occurredAt),
+    })
+    .where(eq(s.sales.id, sale.id))
+    .returning();
+  await emit(tx, { entity: 'sales', record: dto.sales(updated) });
+  return {
+    sale,
+    payments: payments.sort(
+      (a, b) => a.receivedAt.localeCompare(b.receivedAt) || a.id.localeCompare(b.id),
+    ),
+  };
+}
+async function applyPayment(
+  tx: Transaction,
+  storeId: string,
+  payment: Extract<SyncChange, { entity: 'payments' }>['record'],
+  customerId?: string,
+) {
+  const [sale] = await tx
+    .select()
+    .from(s.sales)
+    .where(and(eq(s.sales.id, payment.saleId), eq(s.sales.storeId, storeId)));
+  requireRule(
+    sale && sale.status === 'active' && (!customerId || sale.customerId === customerId),
+    'This repayment does not reference an active sale for this customer in this store.',
+  );
+  const payments = await tx
+    .select()
+    .from(s.payments)
+    .where(and(eq(s.payments.saleId, sale.id), eq(s.payments.storeId, storeId)));
+  requireRule(
+    payment.amountKobo <= outstandingFor(dto.sales(sale), payments.map(dto.payments)),
+    'Payment exceeds the outstanding balance.',
+  );
+  await insertPayment(tx, payment);
 }
 function scopedPayload(value: unknown, storeId: string): void {
   if (!value || typeof value !== 'object') return;
@@ -122,6 +244,23 @@ async function applyOperation(tx: Transaction, op: SyncOperation) {
   } else if (op.kind === 'sale.create') {
     const { sale, customer, items, payment, movements } = op.payload;
     requireRule(
+      !sale.voidReason && !sale.voidedAt && sale.replacesSaleId === op.payload.correction?.saleId,
+      'A replacement sale must reference its audited correction.',
+    );
+    const original = op.payload.correction
+      ? await reverseSale(tx, storeId, op.payload.correction)
+      : undefined;
+    requireRule(
+      !original ||
+        (original.sale.occurredAt.toISOString() === sale.occurredAt &&
+          original.sale.id !== sale.id),
+      'A correction must preserve the original sale date and use a new receipt ID.',
+    );
+    requireRule(
+      original ? !payment && !!op.payload.replacementPayments : !op.payload.replacementPayments,
+      'Invalid correction payment history.',
+    );
+    requireRule(
       sale.status === 'active' && sale.customerId === customer.id,
       'A new sale must have an active customer association.',
     );
@@ -162,6 +301,30 @@ async function applyOperation(tx: Transaction, op: SyncOperation) {
           payment.receivedAt === sale.occurredAt,
         'Invalid initial payment.',
       );
+    if (original) {
+      const replacements = op.payload.replacementPayments!;
+      let remaining = sumKobo(replacements.map((p) => p.amountKobo));
+      requireRule(remaining <= total, 'Corrected payments cannot exceed the sale total.');
+      const expected: { amountKobo: number; receivedAt: string }[] = [];
+      for (const previous of original.payments) {
+        const amountKobo = Math.min(remaining, previous.amountKobo);
+        if (amountKobo) expected.push({ amountKobo, receivedAt: previous.receivedAt });
+        remaining -= amountKobo;
+      }
+      if (remaining)
+        expected.push({ amountKobo: remaining, receivedAt: op.payload.correction!.occurredAt });
+      requireRule(
+        replacements.length === expected.length &&
+          replacements.every(
+            (p, i) =>
+              p.saleId === sale.id &&
+              !p.reversalOf &&
+              p.amountKobo === expected[i].amountKobo &&
+              p.receivedAt === expected[i].receivedAt,
+          ),
+        'Corrected payments must preserve their original collection dates.',
+      );
+    }
     requireRule(
       movements.length === items.filter((i) => i.productUnitId).length &&
         new Set(movements.map((m) => m.saleItemId)).size === movements.length,
@@ -173,6 +336,7 @@ async function applyOperation(tx: Transaction, op: SyncOperation) {
       occurredAt: new Date(sale.occurredAt),
       createdAt: new Date(sale.createdAt),
       updatedAt: new Date(sale.createdAt),
+      voidedAt: null,
     });
     await emit(tx, { entity: 'sales', record: sale });
     for (const item of items) {
@@ -218,25 +382,20 @@ async function applyOperation(tx: Transaction, op: SyncOperation) {
       await insertMovement(tx, movement);
     }
     if (payment) await insertPayment(tx, payment);
+    for (const replacement of op.payload.replacementPayments ?? [])
+      await insertPayment(tx, replacement);
   } else if (op.kind === 'payment.create') {
-    const payment = op.payload;
-    const [sale] = await tx
-      .select()
-      .from(s.sales)
-      .where(and(eq(s.sales.id, payment.saleId), eq(s.sales.storeId, storeId)));
+    await applyPayment(tx, storeId, op.payload);
+  } else if (op.kind === 'payment.allocate') {
+    const { customerId, payments } = op.payload;
     requireRule(
-      sale && sale.status === 'active',
-      'This repayment does not reference an active sale in this store.',
+      new Set(payments.map((p) => p.saleId)).size === payments.length,
+      'Select each sale only once.',
     );
-    const payments = await tx
-      .select()
-      .from(s.payments)
-      .where(and(eq(s.payments.saleId, sale.id), eq(s.payments.storeId, storeId)));
-    requireRule(
-      payment.amountKobo <= outstandingFor(dto.sales(sale), payments.map(dto.payments)),
-      'Payment exceeds the outstanding balance.',
-    );
-    await insertPayment(tx, payment);
+    sumKobo(payments.map((p) => p.amountKobo));
+    for (const payment of payments) await applyPayment(tx, storeId, payment, customerId);
+  } else if (op.kind === 'sale.void') {
+    await reverseSale(tx, storeId, op.payload);
   } else {
     const { unitId, count, movement } = op.payload;
     const unit = await getUnit(tx, storeId, unitId);

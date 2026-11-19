@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { db } from '../db/database';
-import { saveSale } from '../db/ledger';
+import { saveSale, voidSale } from '../db/ledger';
 import { createLocalStore } from '../db/store';
 import { exportData } from './export';
 
@@ -79,4 +79,13 @@ it('keeps the JSON backup in integer kobo and ISO timestamps', async () => {
   const backup = JSON.parse(await exported!.text());
   expect(backup.sales[0]).toMatchObject({ totalKobo: 101, occurredAt: '2026-11-18T12:40:43.000Z' });
   expect(backup.payments[0].amountKobo).toBe(1);
+});
+
+it('includes void status and the audit reason in sales exports', async () => {
+  const saved = await sale(100, 0);
+  await voidSale(saved.id, 'Duplicate receipt', [], crypto.randomUUID());
+  await exportData('sales');
+  const csv = await exported!.text();
+  expect(csv).toContain('"Void reason","Voided at (Africa/Lagos)","Replaces sale ID"');
+  expect(csv).toContain('"0.00","voided","Duplicate receipt"');
 });

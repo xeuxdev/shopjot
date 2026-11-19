@@ -13,7 +13,14 @@ import * as tables from '../backend/src/db/schema';
 import { readSnapshot } from '../backend/src/records';
 import { LedgerDB, getIdentity } from '../frontend/src/db/database';
 import { createLocalStore } from '../frontend/src/db/store';
-import { adjustStock, recordPayment, registerStock, saveSale } from '../frontend/src/db/ledger';
+import {
+  adjustStock,
+  recordPayment,
+  registerStock,
+  saveSale,
+  voidSale,
+  recordCustomerPayment,
+} from '../frontend/src/db/ledger';
 import { runSync, localSnapshot, toWire } from '../frontend/src/features/sync/engine';
 import { HttpError } from '../frontend/src/features/sync/http';
 import type { LocalAccount, SyncState } from '../frontend/src/db/sync-state';
@@ -134,6 +141,174 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       }
       await app.close();
       await pool.end();
+    });
+    it('syncs audited corrections and grouped payments, retries and restores the same history', async () => {
+      const o = await owner();
+      await registerStock('Rice', 'mudu', '15', 350000, crypto.randomUUID(), o.local);
+      const unit = (await o.local.productUnits.toArray())[0];
+      const originalInput = saleInput(unit.id);
+      const original = await saveSale(originalInput, o.local);
+      await recordPayment(original.id, 100000, crypto.randomUUID(), o.local);
+      expect(await runSync({ database: o.local, request: o.request, force: true })).toBe('done');
+      const originals = await o.local.payments.toArray();
+      const corrected = saleInput(unit.id);
+      corrected.customerId = original.customerId;
+      corrected.occurredAt = original.occurredAt;
+      corrected.initialPaymentKobo = 600000;
+      corrected.items[0].quantity = '3';
+      corrected.correction = {
+        saleId: original.id,
+        reason: 'Wrong quantity',
+        expectedPaymentIds: originals.map((p) => p.id),
+      };
+      const replacement = await saveSale(corrected, o.local);
+      let lost = false;
+      const unreliable: typeof o.request = async (path, init) => {
+        const result = await o.request(path, init);
+        if (path === '/sync/push' && !lost) {
+          lost = true;
+          throw new TypeError('Response lost');
+        }
+        return result;
+      };
+      expect(await runSync({ database: o.local, request: unreliable, force: true })).toBe('retry');
+      expect(await runSync({ database: o.local, request: o.request, force: true })).toBe('done');
+      let remote = await readSnapshot(db, o.account.storeId);
+      expect(remote.sales.find((sale) => sale.id === original.id)).toMatchObject({
+        status: 'voided',
+        voidReason: 'Wrong quantity',
+      });
+      expect(remote.units[0].quantityOnHand).toBe('12');
+      expect(snapshotJson(remote)).toBe(
+        snapshotJson(await localSnapshot(o.local, o.account.storeId)),
+      );
+      const nextInput = saleInput();
+      nextInput.customerId = original.customerId;
+      nextInput.initialPaymentKobo = 0;
+      const next = await saveSale(nextInput, o.local);
+      await recordCustomerPayment(
+        original.customerId,
+        [
+          { saleId: replacement.id, amountKobo: 100000 },
+          { saleId: next.id, amountKobo: 100000 },
+        ],
+        crypto.randomUUID(),
+        o.local,
+      );
+      expect(await runSync({ database: o.local, request: o.request, force: true })).toBe('done');
+      const phone = await anotherPhone(o);
+      expect(await runSync({ database: phone.local, request: phone.request, force: true })).toBe(
+        'done',
+      );
+      expect(snapshotJson(await localSnapshot(phone.local, o.account.storeId))).toBe(
+        snapshotJson(await localSnapshot(o.local, o.account.storeId)),
+      );
+      const expected = (await o.local.payments.toArray())
+        .filter((p) => p.saleId === replacement.id && !p.reversalOf)
+        .map((p) => p.id);
+      await voidSale(replacement.id, 'Goods returned', expected, crypto.randomUUID(), o.local);
+      expect(await runSync({ database: o.local, request: o.request, force: true })).toBe('done');
+      remote = await readSnapshot(db, o.account.storeId);
+      expect(remote.units[0].quantityOnHand).toBe('15');
+      expect(snapshotJson(remote)).toBe(
+        snapshotJson(await localSnapshot(o.local, o.account.storeId)),
+      );
+    });
+    it('rejects a stale correction atomically when another phone has collected a payment', async () => {
+      const o = await owner();
+      const original = await saveSale(saleInput(), o.local);
+      expect(await runSync({ database: o.local, request: o.request, force: true })).toBe('done');
+      const phone = await anotherPhone(o);
+      expect(await runSync({ database: phone.local, request: phone.request, force: true })).toBe(
+        'done',
+      );
+      const expected = (await o.local.payments.toArray()).map((p) => p.id);
+      const correction = saleInput();
+      correction.customerId = original.customerId;
+      correction.occurredAt = original.occurredAt;
+      correction.correction = {
+        saleId: original.id,
+        reason: 'Wrong goods',
+        expectedPaymentIds: expected,
+      };
+      await saveSale(correction, o.local);
+      await recordPayment(original.id, 100000, crypto.randomUUID(), phone.local);
+      expect(await runSync({ database: phone.local, request: phone.request, force: true })).toBe(
+        'done',
+      );
+      expect(await runSync({ database: o.local, request: o.request, force: true })).toBe('blocked');
+      const remote = await readSnapshot(db, o.account.storeId);
+      expect(remote.sales).toHaveLength(1);
+      expect(remote.sales[0].status).toBe('active');
+      expect(remote.payments).toHaveLength(2);
+      expect(remote.payments.every((p) => p.reversalOf === null)).toBe(true);
+      expect((await o.local.outbox.get(correction.operationId))?.error).toContain(
+        'Payments changed',
+      );
+    });
+    it('rolls back a grouped repayment when another phone has paid one selected sale', async () => {
+      const o = await owner();
+      const first = await saveSale(saleInput(), o.local);
+      const raw = saleInput();
+      raw.customerId = first.customerId;
+      const second = await saveSale(raw, o.local);
+      expect(await runSync({ database: o.local, request: o.request, force: true })).toBe('done');
+      const phone = await anotherPhone(o);
+      expect(await runSync({ database: phone.local, request: phone.request, force: true })).toBe(
+        'done',
+      );
+      const operationId = crypto.randomUUID();
+      await recordCustomerPayment(
+        first.customerId,
+        [
+          { saleId: first.id, amountKobo: 100000 },
+          { saleId: second.id, amountKobo: 100000 },
+        ],
+        operationId,
+        o.local,
+      );
+      await recordPayment(second.id, 650000, crypto.randomUUID(), phone.local);
+      expect(await runSync({ database: phone.local, request: phone.request, force: true })).toBe(
+        'done',
+      );
+      const before = await readSnapshot(db, o.account.storeId);
+      expect(await runSync({ database: o.local, request: o.request, force: true })).toBe('blocked');
+      expect(snapshotJson(await readSnapshot(db, o.account.storeId))).toBe(snapshotJson(before));
+      expect((await o.local.outbox.get(operationId))?.status).toBe('failed');
+    });
+    it('rejects forged audit reversals without changing server payments or stock', async () => {
+      const o = await owner();
+      await registerStock('Rice', 'mudu', '15', 350000, crypto.randomUUID(), o.local);
+      const unit = (await o.local.productUnits.toArray())[0];
+      const original = await saveSale(saleInput(unit.id), o.local);
+      expect(await runSync({ database: o.local, request: o.request, force: true })).toBe('done');
+      const before = await readSnapshot(db, o.account.storeId);
+      const corrected = saleInput(unit.id);
+      corrected.customerId = original.customerId;
+      corrected.occurredAt = original.occurredAt;
+      corrected.correction = {
+        saleId: original.id,
+        reason: 'Wrong quantity',
+        expectedPaymentIds: before.payments.map((p) => p.id),
+      };
+      await saveSale(corrected, o.local);
+      const operation = await toWire((await o.local.outbox.get(corrected.operationId))!, o.local);
+      if (operation.kind !== 'sale.create' || !operation.payload.correction)
+        throw new Error('Missing correction');
+      operation.payload.correction.reversals[0].amountKobo++;
+      await expect(
+        o.request('/sync/push', { method: 'POST', body: JSON.stringify(operation) }),
+      ).rejects.toThrow('Invalid payment reversal');
+      expect(snapshotJson(await readSnapshot(db, o.account.storeId))).toBe(snapshotJson(before));
+      const untouched = await toWire((await o.local.outbox.get(corrected.operationId))!, o.local);
+      if (untouched.kind !== 'sale.create' || !untouched.payload.correction)
+        throw new Error('Missing correction');
+      untouched.payload.correction.movements[0].quantityDelta = '999';
+      await expect(
+        o.request('/sync/push', { method: 'POST', body: JSON.stringify(untouched) }),
+      ).rejects.toThrow('Invalid stock reversal');
+      expect(snapshotJson(await readSnapshot(db, o.account.storeId))).toBe(snapshotJson(before));
+      expect(await runSync({ database: o.local, request: o.request, force: true })).toBe('done');
     });
     it('backs up every entity, retries lost responses, and lets both signed-in phones record sales', async () => {
       const o = await owner();

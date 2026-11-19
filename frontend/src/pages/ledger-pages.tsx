@@ -1,3 +1,8 @@
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '../db/database';
+import { hasDraftContent, type Draft } from '../features/sale-draft';
+import { CustomerPayment } from '../features/customer-payment';
+import { SaleActions } from '../features/sale-actions';
 import { useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
@@ -51,6 +56,7 @@ const initials = (name: string) =>
     .join('')
     .toUpperCase();
 export function Status({ sale, data }: { sale: Sale; data: Ledger }) {
+  if (sale.status === 'voided') return <span className="status-badge voided">Voided</span>;
   const status = paymentStatus(sale, data.payments);
   return (
     <span className={`status-badge ${status}`}>
@@ -80,6 +86,13 @@ export function SaleRow({ sale, data }: { sale: Sale; data: Ledger }) {
 export function Home({ data }: { data: Ledger }) {
   const navigate = useNavigate();
   const stats = dashboard(data.sales, data.payments);
+  const draft = useLiveQuery(async () => {
+    const saved = (await db.metadata.get('sale-draft'))?.value as Draft | undefined;
+    return saved && hasDraftContent(saved) && !(await db.sales.get(saved.id)) ? saved : undefined;
+  });
+  const reversedPayments = new Set(
+    data.payments.filter((p) => p.reversalOf).map((p) => p.reversalOf),
+  );
   const owedCustomers = data.customers
     .map((c) => ({
       ...c,
@@ -92,17 +105,24 @@ export function Home({ data }: { data: Ledger }) {
     .filter((c) => c.owed > 0)
     .sort((a, b) => b.owed - a.owed);
   const activity = [
-    ...data.sales.map((s) => ({
-      type: 'sale' as const,
-      date: s.occurredAt,
-      sale: s,
-      amount: s.totalKobo,
-      id: s.id,
-    })),
+    ...data.sales
+      .filter((s) => s.status === 'active')
+      .map((s) => ({
+        type: 'sale' as const,
+        date: s.occurredAt,
+        sale: s,
+        amount: s.totalKobo,
+        id: s.id,
+      })),
     ...data.payments
       .filter((p) => {
         const s = data.sales.find((s) => s.id === p.saleId);
-        return s && p.receivedAt !== s.occurredAt;
+        return (
+          s?.status === 'active' &&
+          !p.reversalOf &&
+          !reversedPayments.has(p.id) &&
+          p.receivedAt !== s.occurredAt
+        );
       })
       .map((p) => ({
         type: 'payment' as const,
@@ -127,6 +147,17 @@ export function Home({ data }: { data: Ledger }) {
           Record sale
         </Button>
       </div>
+      {draft && (
+        <div className="draft-banner">
+          <div>
+            <strong>Finish your {draft.correction ? 'correction' : 'sale'}</strong>
+            <p>{draft.customer || 'An unfinished sale'} is saved on this phone.</p>
+          </div>
+          <Link className="button button-outline" to="/sales/new">
+            Resume draft
+          </Link>
+        </div>
+      )}
       <div className="stats-grid">
         <section className="sales-stat">
           <div className="stat-label">
@@ -291,7 +322,10 @@ export function Sales({ data }: { data: Ledger }) {
       .join(' ')}`.toLocaleLowerCase();
     return (
       text.includes(search.toLocaleLowerCase()) &&
-      (status === 'all' || paymentStatus(s, data.payments) === status) &&
+      (status === 'all' ||
+        (status === 'voided'
+          ? s.status === 'voided'
+          : s.status === 'active' && paymentStatus(s, data.payments) === status)) &&
       (!day || localDay(s.occurredAt) === day)
     );
   });
@@ -329,6 +363,7 @@ export function Sales({ data }: { data: Ledger }) {
             ['paid', 'Paid'],
             ['partial', 'Part payment'],
             ['unpaid', 'Unpaid'],
+            ['voided', 'Voided'],
           ].map(([key, title]) => (
             <button
               key={key}
@@ -443,7 +478,13 @@ export function SaleDetail({ data, notify }: { data: Ledger; notify: (message: s
                   <strong>{money(p.amountKobo)}</strong>
                   <small>{shortDate(p.receivedAt)}</small>
                   <small>
-                    {p.receivedAt === sale.occurredAt ? 'Received at sale' : 'Later repayment'}
+                    {p.reversalOf
+                      ? 'Reversal of recorded payment'
+                      : data.payments.some((entry) => entry.reversalOf === p.id)
+                        ? 'Reversed payment'
+                        : p.receivedAt === sale.occurredAt
+                          ? 'Received at sale'
+                          : 'Later repayment'}
                   </small>
                 </div>
               </div>
@@ -473,10 +514,7 @@ export function SaleDetail({ data, notify }: { data: Ledger; notify: (message: s
           </Link>
         </section>
       </div>
-      <p className="quiet-note">
-        Saved financial records are preserved. Corrections and voiding are planned for a later
-        phase.
-      </p>
+      <SaleActions sale={sale} data={data} notify={notify} />
       <Modal
         open={open}
         onOpenChange={setOpen}
@@ -579,7 +617,13 @@ export function Customers({ data }: { data: Ledger }) {
     </>
   );
 }
-export function CustomerDetail({ data }: { data: Ledger }) {
+export function CustomerDetail({
+  data,
+  notify,
+}: {
+  data: Ledger;
+  notify: (message: string) => void;
+}) {
   const { id } = useParams();
   const customer = data.customers.find((c) => c.id === id);
   if (!customer)
@@ -612,7 +656,7 @@ export function CustomerDetail({ data }: { data: Ledger }) {
           <span>Amount still owed</span>
           <strong>{money(owed)}</strong>
         </div>
-        <p>To record a repayment, open the specific sale being paid.</p>
+        <CustomerPayment customerId={customer.id} data={data} notify={notify} />
       </div>
       <section className="panel">
         <SectionTitle>Purchases</SectionTitle>
@@ -634,6 +678,11 @@ export function CustomerDetail({ data }: { data: Ledger }) {
                 <strong>{money(p.amountKobo)}</strong>
                 <small>
                   {shortDate(p.receivedAt)} · sale #{p.saleId.slice(0, 8)}
+                  {p.reversalOf
+                    ? ' · Payment reversal'
+                    : data.payments.some((entry) => entry.reversalOf === p.id)
+                      ? ' · Reversed'
+                      : ''}
                 </small>
               </div>
               <ChevronRight size={16} />

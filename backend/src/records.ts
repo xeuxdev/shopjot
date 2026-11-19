@@ -39,6 +39,9 @@ export const dto = {
     totalKobo: Number(r.totalKobo),
     occurredAt: r.occurredAt.toISOString(),
     status: r.status as 'active' | 'voided',
+    ...(r.voidedAt ? { voidedAt: r.voidedAt.toISOString() } : {}),
+    ...(r.voidReason ? { voidReason: r.voidReason } : {}),
+    ...(r.replacesSaleId ? { replacesSaleId: r.replacesSaleId } : {}),
   }),
   items: (r: typeof s.saleItems.$inferSelect): LedgerSnapshot['items'][number] => ({
     ...scoped(r),
