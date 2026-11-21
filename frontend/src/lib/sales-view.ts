@@ -7,6 +7,7 @@ export const salesPeriods = [
   ['yesterday', 'Yesterday'],
   ['week', 'Last 7 days'],
   ['month', 'This month'],
+  ['date', 'Pick a date'],
   ['custom', 'Custom dates'],
 ] as const;
 export type SalesPeriod = (typeof salesPeriods)[number][0];

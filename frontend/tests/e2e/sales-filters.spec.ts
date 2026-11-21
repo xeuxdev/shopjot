@@ -152,6 +152,34 @@ test('date shortcuts, daily totals and combined filters work offline', async ({
   );
 });
 
+test('a single picked date shows only that day and its total', async ({ page }) => {
+  await seedSales(page);
+  await page.getByRole('button', { name: 'Pick a date', exact: true }).click();
+  const date = page.getByLabel('Sale date', { exact: true });
+  await expect(date).toHaveValue('2026-11-21');
+  await date.fill('2026-11-20');
+  await expect(page.locator('.sales-day')).toHaveCount(1);
+  await expect(page.locator('.sales-day .ledger-row')).toHaveCount(1);
+  await expect(page.locator('.sales-day-total strong')).toHaveText('₦4,000');
+  await expect(page.locator('.sales-total-main > strong')).toHaveText('₦4,000');
+  await page.reload();
+  await expect(date).toHaveValue('2026-11-20');
+  await expect(page.locator('.sales-total-main > strong')).toHaveText('₦4,000');
+  await page.setViewportSize({ width: 320, height: 800 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: 'test-results/sales-single-date-320.png', fullPage: true });
+  const result = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
+    .analyze();
+  expect(result.violations).toEqual([]);
+  await date.fill('');
+  await expect(page.getByRole('heading', { name: 'Pick a sale date' })).toBeVisible();
+  await expect(page.locator('.sales-totals')).toHaveCount(0);
+  await date.fill('2026-11-22');
+  await expect(page.getByRole('heading', { name: 'No matching sales' })).toBeVisible();
+  await expect(page.locator('.sales-total-main > strong')).toHaveText('₦0');
+});
+
 test('custom ranges are inclusive, survive reload and receipt navigation, and explain invalid or empty ranges', async ({
   page,
 }) => {

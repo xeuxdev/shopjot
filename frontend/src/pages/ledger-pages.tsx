@@ -339,8 +339,14 @@ export function Sales({ data }: { data: Ledger }) {
     const value = params.get(key) ?? '';
     return z.iso.date().safeParse(value).success ? value : '';
   };
+  const selectedDate = validDate('date');
   const { from, to } =
-    period === 'custom' ? { from: validDate('from'), to: validDate('to') } : salesDateRange(period);
+    period === 'date'
+      ? { from: selectedDate, to: selectedDate }
+      : period === 'custom'
+        ? { from: validDate('from'), to: validDate('to') }
+        : salesDateRange(period);
+  const needsDate = period === 'date' && !selectedDate;
   const invalidRange = Boolean(from && to && from > to);
   const view = salesView(data, { search, status, from, to });
   const filtered = Boolean(search || status !== 'all' || period !== 'all');
@@ -361,6 +367,12 @@ export function Sales({ data }: { data: Ledger }) {
         if (value && !((key === 'period' || key === 'status') && value === 'all'))
           next.set(key, value);
         else next.delete(key);
+        if (
+          key === 'period' &&
+          value === 'date' &&
+          !z.iso.date().safeParse(next.get('date')).success
+        )
+          next.set('date', salesDateRange('today').from);
         return next;
       },
       { replace: true },
@@ -404,6 +416,23 @@ export function Sales({ data }: { data: Ledger }) {
               </button>
             ))}
           </div>
+          {period === 'date' && (
+            <div className="sales-date-range sales-single-date">
+              <div>
+                <label htmlFor="sales-date">Sale date</label>
+                <input
+                  id="sales-date"
+                  type="date"
+                  value={selectedDate}
+                  aria-describedby="sales-date-hint"
+                  onChange={(e) => updateFilter('date', e.target.value)}
+                />
+              </div>
+              <p className="field-hint" id="sales-date-hint">
+                See sales and the total for this day.
+              </p>
+            </div>
+          )}
           {period === 'custom' && (
             <div className="sales-date-range">
               <div>
@@ -434,7 +463,7 @@ export function Sales({ data }: { data: Ledger }) {
               >
                 {invalidRange
                   ? 'Choose a to date on or after the from date.'
-                  : 'Both dates are included. Use the same date to see one day.'}
+                  : 'Both dates are included.'}
               </p>
             </div>
           )}
@@ -468,6 +497,10 @@ export function Sales({ data }: { data: Ledger }) {
         {invalidRange ? (
           <Empty title="Check your date range">
             The from date must come before or on the to date.
+          </Empty>
+        ) : needsDate ? (
+          <Empty title="Pick a sale date">
+            Choose a date above to see that day’s sales and total.
           </Empty>
         ) : (
           <>
