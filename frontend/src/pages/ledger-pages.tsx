@@ -4,11 +4,12 @@ import { hasDraftContent, type Draft } from '../features/sale-draft';
 import { CustomerPayment } from '../features/customer-payment';
 import { SaleActions } from '../features/sale-actions';
 import { useRef, useState, type FormEvent } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowDownLeft,
   ArrowLeft,
   ArrowUpRight,
+  CalendarDays,
   Check,
   ChevronRight,
   CircleCheck,
@@ -23,15 +24,16 @@ import {
 } from 'lucide-react';
 import {
   dashboard,
-  localDay,
   money,
   outstandingFor,
   parseNaira,
   paymentStatus,
   sumKobo,
+  z,
   type Sale,
 } from '../domain/index';
 import type { Ledger } from '../lib/use-ledger';
+import { formatSalesDay, salesDateRange, salesPeriods, salesView } from '../lib/sales-view';
 import { adjustStock, recordPayment, registerStock } from '../db/ledger';
 import { exportData, type ExportKind } from '../lib/export';
 import { userMessage } from '../lib/errors';
@@ -47,6 +49,11 @@ const dateFormat = new Intl.DateTimeFormat('en-NG', {
   minute: '2-digit',
 });
 const shortDate = (date: string) => dateFormat.format(new Date(date));
+const saleTime = new Intl.DateTimeFormat('en-NG', {
+  timeZone: 'Africa/Lagos',
+  hour: 'numeric',
+  minute: '2-digit',
+});
 const initials = (name: string) =>
   name
     .trim()
@@ -65,7 +72,15 @@ export function Status({ sale, data }: { sale: Sale; data: Ledger }) {
     </span>
   );
 }
-export function SaleRow({ sale, data }: { sale: Sale; data: Ledger }) {
+export function SaleRow({
+  sale,
+  data,
+  showTime,
+}: {
+  sale: Sale;
+  data: Ledger;
+  showTime?: boolean;
+}) {
   const customer = data.customers.find((c) => c.id === sale.customerId);
   const items = data.items.filter((i) => i.saleId === sale.id);
   return (
@@ -74,6 +89,9 @@ export function SaleRow({ sale, data }: { sale: Sale; data: Ledger }) {
       <div className="row-main">
         <strong>{customer?.name ?? 'Customer'}</strong>
         <span>{items.map((i) => `${i.quantity} ${i.quantityLabel} ${i.name}`).join(', ')}</span>
+        {showTime && (
+          <time dateTime={sale.occurredAt}>{saleTime.format(new Date(sale.occurredAt))}</time>
+        )}
       </div>
       <div className="row-amount">
         <strong>{money(sale.totalKobo)}</strong>
@@ -311,53 +329,124 @@ export function Home({ data }: { data: Ledger }) {
 }
 export function Sales({ data }: { data: Ledger }) {
   const navigate = useNavigate();
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('all');
-  const [day, setDay] = useState('');
-  const sales = data.sales.filter((s) => {
-    const customer = data.customers.find((c) => c.id === s.customerId)?.name ?? '';
-    const text = `${customer} ${data.items
-      .filter((i) => i.saleId === s.id)
-      .map((i) => i.name)
-      .join(' ')}`.toLocaleLowerCase();
-    return (
-      text.includes(search.toLocaleLowerCase()) &&
-      (status === 'all' ||
-        (status === 'voided'
-          ? s.status === 'voided'
-          : s.status === 'active' && paymentStatus(s, data.payments) === status)) &&
-      (!day || localDay(s.occurredAt) === day)
+  const [params, setParams] = useSearchParams();
+  const search = params.get('search') ?? '';
+  const status = ['paid', 'partial', 'unpaid', 'voided'].includes(params.get('status') ?? '')
+    ? params.get('status')!
+    : 'all';
+  const period = salesPeriods.find(([key]) => key === params.get('period'))?.[0] ?? 'all';
+  const validDate = (key: string) => {
+    const value = params.get(key) ?? '';
+    return z.iso.date().safeParse(value).success ? value : '';
+  };
+  const { from, to } =
+    period === 'custom' ? { from: validDate('from'), to: validDate('to') } : salesDateRange(period);
+  const invalidRange = Boolean(from && to && from > to);
+  const view = salesView(data, { search, status, from, to });
+  const filtered = Boolean(search || status !== 'all' || period !== 'all');
+  const rangeLabel =
+    from && to
+      ? from === to
+        ? formatSalesDay(from)
+        : `${formatSalesDay(from)} – ${formatSalesDay(to)}`
+      : from
+        ? `From ${formatSalesDay(from)}`
+        : to
+          ? `Up to ${formatSalesDay(to)}`
+          : 'All dates';
+  function updateFilter(key: string, value: string) {
+    setParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        if (value && !((key === 'period' || key === 'status') && value === 'all'))
+          next.set(key, value);
+        else next.delete(key);
+        return next;
+      },
+      { replace: true },
     );
-  });
+  }
+  const clearFilters = () => setParams({}, { replace: true });
   return (
     <>
       <div className="page-heading">
         <div>
           <p className="subtle">Your store’s sale book</p>
           <h1>Sales</h1>
-          <p className="heading-description">The goods, the customer, and every payment.</p>
+          <p className="heading-description">Find a sale and see how each day adds up.</p>
         </div>
         <Button onClick={() => navigate('/sales/new')}>
           <Plus size={18} />
           Record sale
         </Button>
       </div>
-      <section className="panel">
-        <div className="list-toolbar">
+      <section className="panel sales-book" aria-label="Sale book">
+        <div className="sales-date-controls">
+          <div className="sales-filter-heading">
+            <span>
+              <CalendarDays size={17} aria-hidden="true" /> Sale dates
+            </span>
+            {filtered && (
+              <Button variant="ghost" size="sm" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            )}
+          </div>
+          <div className="sales-periods" role="group" aria-label="Filter by sale dates">
+            {salesPeriods.map(([key, title]) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={period === key}
+                onClick={() => updateFilter('period', key)}
+              >
+                {title}
+              </button>
+            ))}
+          </div>
+          {period === 'custom' && (
+            <div className="sales-date-range">
+              <div>
+                <label htmlFor="sales-from">From date</label>
+                <input
+                  id="sales-from"
+                  type="date"
+                  value={from}
+                  onChange={(e) => updateFilter('from', e.target.value)}
+                />
+              </div>
+              <div>
+                <label htmlFor="sales-to">To date</label>
+                <input
+                  id="sales-to"
+                  type="date"
+                  min={from || undefined}
+                  value={to}
+                  aria-invalid={invalidRange || undefined}
+                  aria-describedby={invalidRange ? 'sales-range-error' : undefined}
+                  onChange={(e) => updateFilter('to', e.target.value)}
+                />
+              </div>
+              <p
+                className={invalidRange ? 'field-error' : 'field-hint'}
+                id="sales-range-error"
+                role={invalidRange ? 'alert' : undefined}
+              >
+                {invalidRange
+                  ? 'Choose a to date on or after the from date.'
+                  : 'Both dates are included. Use the same date to see one day.'}
+              </p>
+            </div>
+          )}
+        </div>
+        <div className="list-toolbar sales-search">
           <SearchField
             value={search}
-            onChange={setSearch}
+            onChange={(value) => updateFilter('search', value)}
             placeholder="Search customer or goods…"
           />
-          <input
-            className="date-filter"
-            type="date"
-            aria-label="Filter by sale date"
-            value={day}
-            onChange={(e) => setDay(e.target.value)}
-          />
         </div>
-        <div className="filter-tabs" aria-label="Filter payment status">
+        <div className="filter-tabs" role="group" aria-label="Filter payment status">
           {[
             ['all', 'All sales'],
             ['paid', 'Paid'],
@@ -370,25 +459,73 @@ export function Sales({ data }: { data: Ledger }) {
               type="button"
               aria-pressed={key === status}
               className={status === key ? 'active' : ''}
-              onClick={() => setStatus(key)}
+              onClick={() => updateFilter('status', key)}
             >
               {title}
             </button>
           ))}
         </div>
-        {sales.length ? (
-          sales.map((s) => (
-            <div key={s.id}>
-              <div className="sale-date-label">{shortDate(s.occurredAt)}</div>
-              <SaleRow sale={s} data={data} />
-            </div>
-          ))
-        ) : (
-          <Empty title={data.sales.length ? 'No matching sales' : 'Your sale book is ready'}>
-            {data.sales.length
-              ? 'Try a different name, item, or filter.'
-              : 'Record a sale to start keeping track of your day.'}
+        {invalidRange ? (
+          <Empty title="Check your date range">
+            The from date must come before or on the to date.
           </Empty>
+        ) : (
+          <>
+            <div className="sales-totals" role="status" aria-live="polite" aria-atomic="true">
+              <div className="sales-total-main">
+                <h2>{filtered ? 'Total sales matching filters' : 'Total sales'}</h2>
+                <strong>{money(view.totalKobo)}</strong>
+                <p>
+                  {rangeLabel} · {view.count} {view.count === 1 ? 'record' : 'records'}
+                </p>
+              </div>
+              <p className="sales-total-note">
+                Includes unpaid sales. Voided sales are excluded from totals.
+              </p>
+            </div>
+            {view.count ? (
+              view.groups.map((group) => (
+                <section
+                  className="sales-day"
+                  key={group.day}
+                  aria-label={`Sales for ${formatSalesDay(group.day)}`}
+                >
+                  <div className="sales-day-heading">
+                    <div>
+                      <h2>
+                        <time dateTime={group.day}>{formatSalesDay(group.day)}</time>
+                      </h2>
+                      <p>
+                        {group.sales.length} {group.sales.length === 1 ? 'record' : 'records'}
+                      </p>
+                    </div>
+                    <div className="sales-day-total">
+                      <span>Daily total</span>
+                      <strong>{money(group.totalKobo)}</strong>
+                    </div>
+                  </div>
+                  {group.sales.map((sale) => (
+                    <SaleRow key={sale.id} sale={sale} data={data} showTime />
+                  ))}
+                </section>
+              ))
+            ) : (
+              <Empty
+                title={data.sales.length ? 'No matching sales' : 'Your sale book is ready'}
+                action={
+                  filtered ? (
+                    <Button variant="outline" onClick={clearFilters}>
+                      Clear filters
+                    </Button>
+                  ) : undefined
+                }
+              >
+                {data.sales.length
+                  ? 'Try different dates, a customer name, or a payment status.'
+                  : 'Record a sale to start keeping track of your day.'}
+              </Empty>
+            )}
+          </>
         )}
       </section>
     </>

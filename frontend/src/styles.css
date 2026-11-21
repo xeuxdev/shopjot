@@ -1214,10 +1214,6 @@ input::placeholder {
   font-size: 12px;
   background: #fcfdfb;
 }
-.date-filter {
-  max-width: 180px;
-  color-scheme: light;
-}
 .filter-tabs {
   display: flex;
   align-items: center;
@@ -1240,10 +1236,141 @@ input::placeholder {
   color: #57723f;
   border-color: #e4eddb;
 }
-.sale-date-label {
-  font-size: 9px;
-  padding: 13px 22px 0;
-  color: #656c5c;
+.sales-date-controls {
+  padding: 18px 22px 0;
+}
+.sales-filter-heading,
+.sales-filter-heading > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sales-filter-heading {
+  justify-content: space-between;
+  min-height: 44px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.sales-periods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.sales-periods button {
+  min-height: 44px;
+  border: 1px solid #dbe3dc;
+  border-radius: 8px;
+  padding: 9px 14px;
+  background: #fff;
+  color: #405747;
+  font-size: 12px;
+}
+.sales-periods button[aria-pressed='true'] {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
+}
+.sales-date-range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 220px));
+  gap: 10px 14px;
+  margin-top: 18px;
+}
+.sales-date-range > div {
+  min-width: 0;
+}
+.sales-date-range label {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.sales-date-range input {
+  min-width: 0;
+  max-width: 100%;
+  color-scheme: light;
+}
+.sales-date-range > p {
+  grid-column: 1 / -1;
+  margin: 0;
+  line-height: 1.5;
+}
+.sales-search .search-field {
+  max-width: none;
+}
+.sales-totals {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  padding: 22px;
+  background: #edf5ef;
+  border-bottom: 1px solid #dbe8de;
+}
+.sales-total-main {
+  min-width: 0;
+}
+.sales-total-main h2 {
+  font-size: 13px;
+  letter-spacing: 0;
+}
+.sales-total-main > strong {
+  display: block;
+  color: var(--green);
+  font-size: clamp(26px, 3vw, 34px);
+  letter-spacing: -0.8px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  margin: 5px 0;
+}
+.sales-total-main > p,
+.sales-total-note {
+  font-size: 12px;
+  color: #496151;
+  line-height: 1.6;
+}
+.sales-total-note {
+  max-width: 240px;
+}
+.sales-day-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 22px;
+  background: #f6f8f6;
+  border-block: 1px solid var(--line);
+}
+.sales-day:first-of-type .sales-day-heading {
+  border-top: 0;
+}
+.sales-day-heading h2 {
+  font-size: 14px;
+  letter-spacing: 0;
+}
+.sales-day-heading p,
+.sales-day-total > span,
+.row-main > time {
+  display: block;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #59695e;
+  margin-top: 4px;
+}
+.sales-day-total {
+  min-width: 0;
+  max-width: 50%;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.sales-day-total > span {
+  margin: 0 0 4px;
+}
+.sales-day-total > strong {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
 }
 .detail-layout {
   display: grid;
@@ -2180,8 +2307,36 @@ input::placeholder {
   .search-field > svg {
     top: 15px;
   }
-  .date-filter {
+  .sales-date-controls {
+    padding: 12px 16px 0;
+  }
+  .sales-periods {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+  }
+  .sales-periods button {
+    padding: 9px 5px;
+    font-size: 11px;
+  }
+  .sales-date-range {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .sales-date-range input {
+    padding-inline: 8px;
+    font-size: 16px;
+  }
+  .sales-totals,
+  .sales-day-heading {
+    padding: 16px;
+  }
+  .sales-total-main > p {
+    font-size: 11px;
+  }
+  .sales-total-note {
     max-width: none;
+    font-size: 11px;
   }
   .filter-tabs {
     padding-inline: 16px;
